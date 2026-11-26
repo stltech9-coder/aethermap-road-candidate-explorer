@@ -7,6 +7,6 @@ if not exist "%PYTHON_EXE%" (
   exit /b 1
 )
 cd /d "%~dp0"
-start "" "http://127.0.0.1:8766/"
+start "" "http://127.0.0.1:8767/"
 "%PYTHON_EXE%" sam_backend.py
 if errorlevel 1 pause

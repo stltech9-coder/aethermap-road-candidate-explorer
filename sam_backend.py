@@ -11,6 +11,7 @@ import json
 import math
 import os
 import threading
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -19,6 +20,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, stream
 ROOT = Path(__file__).resolve().parent
 CHECKPOINT = Path.home() / ".cache" / "sam" / "sam_vit_h_4b8939.pth"
 app = Flask(__name__, static_folder=None)
+LOCAL_PORT = int(os.environ.get("AETHERMAP_PORT", "8767"))
 model_lock = threading.Lock()
 mask_generator = None
 
@@ -149,13 +151,55 @@ def sam_status():
     return jsonify(available=available, loaded=mask_generator is not None, reason=reason, model="SAM ViT-H", device="CPU")
 
 
+@app.get("/api/osm-roads")
+def osm_roads():
+    """Small-area reference geometry; this endpoint never edits OSM."""
+    import requests
+
+    try:
+        bbox = [float(v) for v in request.args["bbox"].split(",")]
+        if len(bbox) != 4 or not all(math.isfinite(v) for v in bbox):
+            raise ValueError("Invalid bounding box")
+        west, south, east, north = bbox
+        if not (-180 <= west < east <= 180 and -85 <= south < north <= 85):
+            raise ValueError("Invalid bounding box")
+        if east - west > 0.03 or north - south > 0.03:
+            raise ValueError("Zoom in before loading OSM reference roads")
+    except (KeyError, ValueError) as exc:
+        return jsonify(error=str(exc)), 400
+
+    try:
+        response = requests.get(
+            "https://api.openstreetmap.org/api/0.6/map",
+            params={"bbox": ",".join(map(str, bbox))},
+            headers={"User-Agent": "AetherMapRoadCandidateExplorer/0.2 (local review tool)"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        if len(response.content) > 12_000_000:
+            raise ValueError("OSM response too large; zoom in")
+        root = ET.fromstring(response.content)
+        nodes = {node.get("id"): [float(node.get("lon")), float(node.get("lat"))] for node in root.findall("node")}
+        features = []
+        for way in root.findall("way"):
+            tags = {tag.get("k"): tag.get("v") for tag in way.findall("tag")}
+            if "highway" not in tags or tags["highway"] in {"footway", "path", "cycleway", "steps", "pedestrian", "proposed", "construction"}:
+                continue
+            coords = [nodes[nd.get("ref")] for nd in way.findall("nd") if nd.get("ref") in nodes]
+            if len(coords) >= 2:
+                features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords}, "properties": {"osm_id": way.get("id"), "highway": tags["highway"], "name": tags.get("name", "")}})
+        return jsonify(type="FeatureCollection", features=features, source="OpenStreetMap API 0.6", license="ODbL")
+    except (requests.RequestException, ET.ParseError, ValueError) as exc:
+        return jsonify(error=f"OSM reference unavailable: {exc}"), 502
+
+
 @app.post("/api/sam-trace")
 def sam_trace():
     import numpy as np
     from PIL import Image
 
     origin = request.headers.get("Origin")
-    if origin and origin != "http://127.0.0.1:8766":
+    if origin and origin != f"http://127.0.0.1:{LOCAL_PORT}":
         return jsonify(error="This local model only accepts requests from its own page"), 403
     if request.content_length and request.content_length > 8_000_000:
         return jsonify(error="Image upload is too large"), 413
@@ -205,4 +249,4 @@ def sam_trace():
 
 if __name__ == "__main__":
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
-    app.run(host="127.0.0.1", port=8766, threaded=True, debug=False)
+    app.run(host="127.0.0.1", port=LOCAL_PORT, threaded=True, debug=False)

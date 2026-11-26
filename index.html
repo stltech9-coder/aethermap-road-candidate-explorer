@@ -325,6 +325,8 @@
             border: 1px solid #2a2a3a !important;
         }
         .leaflet-control-zoom a:hover { background: #2a2a3a !important; }
+        .trace-active #map { cursor: crosshair; }
+        .trace-point { background: #ffcc33; border: 2px solid #161820; border-radius: 50%; width: 12px; height: 12px; }
         @media (max-width: 1050px) {
             body { height: auto; overflow: auto; }
             .container { grid-template-columns: minmax(280px, 340px) 1fr; height: auto; }
@@ -418,8 +420,17 @@
                 <div class="section-title">Actions</div>
                 <button class="btn btn-primary" id="btn-detect">🔍 Find Line Candidates</button>
                 <button class="btn btn-accent" id="btn-vectorize">📐 Vectorize Candidates</button>
-                <button class="btn btn-secondary" id="btn-sam" disabled>🧠 SAM-assisted Trace (Local)</button>
+                <button class="btn btn-secondary" id="btn-sam" disabled>🧠 SAM Mask Proposals (Local)</button>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
+                <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
+                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="btn-undo-point" disabled>↶ Undo Point</button>
+                    <button class="btn btn-primary" id="btn-finish-trace" disabled>✓ Save Trace</button>
+                </div>
+                <button class="btn btn-secondary" id="btn-osm" disabled>Load OSM Road Reference</button>
+                <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby OSM roads</label>
+                <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">OSM reference requires the local launcher.</p>
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="btn-preview">👁️ Preview</button>
                     <button class="btn btn-secondary" id="btn-add-to-layer">➕ Add to Layer</button>
@@ -495,7 +506,7 @@
                     <input type="checkbox" checked onchange="detector.toggleLayerVisibility(this.checked)">
                     <div class="layer-color" style="background: #00ff88;"></div>
                     <div class="layer-info">
-                        <div class="layer-name">Unverified Lines</div>
+                        <div class="layer-name">Reviewed / Traced Lines</div>
                         <div class="layer-count" id="layer-count">0 features</div>
                     </div>
                     <div style="display:flex; gap:4px;">
@@ -536,6 +547,13 @@
                 this.allRoads = [];
                 this.captureBounds = null;
                 this.currentSource = 'usgs_naip_edge_extraction';
+                this.traceMode = false;
+                this.tracePoints = [];
+                this.traceMarkers = [];
+                this.traceLine = null;
+                this.osmRoads = [];
+                this.editIndex = null;
+                this.editBackup = null;
 
                 this.captureCanvas = document.getElementById('capture-canvas');
                 this.processCanvas = document.getElementById('process-canvas');
@@ -563,6 +581,9 @@
                 this.map.attributionControl.addAttribution('Imagery: USGS / USDA / The National Map');
                 this.roadLayer = L.layerGroup().addTo(this.map);
                 this.areaLayer = L.layerGroup().addTo(this.map);
+                this.osmLayer = L.layerGroup().addTo(this.map);
+                this.traceLayer = L.layerGroup().addTo(this.map);
+                this.map.attributionControl.addAttribution('OSM roads: © OpenStreetMap contributors (ODbL)');
 
                 this.map.on('mousemove', (e) => {
                     document.getElementById('coords-display').textContent =
@@ -570,6 +591,10 @@
                 });
 
                 this.map.on('click', (e) => {
+                    if (this.traceMode) {
+                        this.addTracePoint(e.latlng);
+                        return;
+                    }
                     document.getElementById('center-lat').value = e.latlng.lat.toFixed(6);
                     document.getElementById('center-lon').value = e.latlng.lng.toFixed(6);
                     this.updateDetectionArea();
@@ -646,6 +671,10 @@
                 document.getElementById('btn-detect').addEventListener('click', () => this.runDetection());
                 document.getElementById('btn-vectorize').addEventListener('click', () => this.vectorizeAndDisplay());
                 document.getElementById('btn-sam').addEventListener('click', () => this.runSamTrace());
+                document.getElementById('btn-trace').addEventListener('click', () => this.toggleTrace());
+                document.getElementById('btn-undo-point').addEventListener('click', () => this.undoTracePoint());
+                document.getElementById('btn-finish-trace').addEventListener('click', () => this.finishTrace());
+                document.getElementById('btn-osm').addEventListener('click', () => this.loadOsmReference());
                 document.getElementById('btn-preview').addEventListener('click', () => this.previewDetection());
                 document.getElementById('btn-add-to-layer').addEventListener('click', () => this.addToMainLayer());
                 document.getElementById('btn-clear-layer').addEventListener('click', () => this.clearAllRoads());
@@ -690,7 +719,7 @@
                 this.captureBounds = { minLat: lat - latOffset, maxLat: lat + latOffset, minLon: lon - lonOffset, maxLon: lon + lonOffset, width: size, height: size };
 
                 const rect = L.rectangle([[lat - latOffset, lon - lonOffset], [lat + latOffset, lon + lonOffset]], {
-                    color: '#00d4aa', fillColor: '#00d4aa', fillOpacity: 0.1, weight: 2, dashArray: '8, 4'
+                    color: '#00d4aa', fillColor: '#00d4aa', fillOpacity: 0.1, weight: 2, dashArray: '8, 4', interactive: false
                 });
 
                 this.areaLayer.addLayer(rect);
@@ -711,6 +740,7 @@
             }
 
             async runDetection() {
+                document.getElementById('btn-add-to-layer').disabled = false;
                 this.detectedEdges = null;
                 this.vectorizedRoads = [];
                 this.currentSource = 'usgs_naip_edge_extraction';
@@ -767,18 +797,156 @@
                     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
                     const info = await response.json();
                     button.disabled = !info.available;
+                    document.getElementById('btn-osm').disabled = false;
+                    document.getElementById('osm-status').textContent = 'Load current-view OSM roads as a blue reference layer; reference roads are not exported.';
                     status.textContent = info.available
                         ? `${info.model} available locally (${info.device}). First scan may take several minutes. Results need review.`
                         : `SAM unavailable: ${info.reason}`;
                 } catch (_) {
                     button.disabled = true;
+                    document.getElementById('btn-osm').disabled = true;
                     status.textContent = 'SAM requires the local launcher; browser edge tracing remains available here.';
                 }
+            }
+
+            async loadOsmReference() {
+                const status = document.getElementById('osm-status');
+                const bounds = this.map.getBounds();
+                const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+                status.textContent = 'Loading OSM road geometry for the current view…';
+                try {
+                    const response = await fetch(`/api/osm-roads?bbox=${encodeURIComponent(bbox.join(','))}`);
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+                    this.osmLayer.clearLayers();
+                    this.osmRoads = data.features.map(feature => feature.geometry.coordinates);
+                    for (const line of this.osmRoads) {
+                        L.polyline(line.map(([lon, lat]) => [lat, lon]), {
+                            color: '#3189ff', weight: 2, opacity: 0.9, interactive: false
+                        }).addTo(this.osmLayer);
+                    }
+                    status.textContent = `${this.osmRoads.length} existing OSM roads shown in blue. Trace new roads in yellow; OSM is reference only.`;
+                } catch (error) {
+                    status.textContent = error.message;
+                }
+            }
+
+            snapToOsm(latlng) {
+                if (!document.getElementById('snap-osm').checked || !this.osmRoads.length) return latlng;
+                const click = this.map.latLngToContainerPoint(latlng);
+                let best = { distance: 8, point: null };
+                for (const line of this.osmRoads) {
+                    for (let i = 1; i < line.length; i++) {
+                        const a = this.map.latLngToContainerPoint([line[i - 1][1], line[i - 1][0]]);
+                        const b = this.map.latLngToContainerPoint([line[i][1], line[i][0]]);
+                        const dx = b.x - a.x, dy = b.y - a.y;
+                        const t = Math.max(0, Math.min(1, ((click.x - a.x) * dx + (click.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+                        const point = L.point(a.x + t * dx, a.y + t * dy);
+                        const distance = click.distanceTo(point);
+                        if (distance < best.distance) best = { distance, point };
+                    }
+                }
+                return best.point ? this.map.containerPointToLatLng(best.point) : latlng;
+            }
+
+            toggleTrace() {
+                if (this.traceMode) {
+                    this.traceMode = false;
+                    this.tracePoints = [];
+                    this.traceLayer.clearLayers();
+                    this.editIndex = null;
+                    document.body.classList.remove('trace-active');
+                    document.getElementById('btn-trace').textContent = '✍️ Trace Road on Map';
+                    document.getElementById('btn-undo-point').disabled = true;
+                    document.getElementById('btn-finish-trace').disabled = true;
+                    this.setMode('ready', 'Trace cancelled');
+                    return;
+                }
+                this.traceMode = true;
+                this.tracePoints = [];
+                document.body.classList.add('trace-active');
+                document.getElementById('btn-trace').textContent = '✕ Cancel Trace';
+                this.setMode('tracing', 'Click road center points on the map; drag yellow vertices to correct them');
+            }
+
+            addTracePoint(latlng) {
+                this.tracePoints.push(this.snapToOsm(latlng));
+                this.renderTrace();
+            }
+
+            undoTracePoint() {
+                if (!this.tracePoints.length) return;
+                this.tracePoints.pop();
+                this.renderTrace();
+            }
+
+            renderTrace() {
+                this.traceLayer.clearLayers();
+                this.traceLine = null;
+                if (this.tracePoints.length > 1) {
+                    this.traceLine = L.polyline(this.tracePoints, { color: '#ffcc33', weight: 4, opacity: 0.95, interactive: false }).addTo(this.traceLayer);
+                }
+                for (let i = 0; i < this.tracePoints.length; i++) {
+                    const marker = L.marker(this.tracePoints[i], {
+                        draggable: true, bubblingMouseEvents: false,
+                        icon: L.divIcon({ className: 'trace-point', iconSize: [12, 12], iconAnchor: [6, 6] })
+                    }).addTo(this.traceLayer);
+                    marker.on('drag', () => {
+                        this.tracePoints[i] = marker.getLatLng();
+                        if (this.traceLine) this.traceLine.setLatLngs(this.tracePoints);
+                    });
+                }
+                document.getElementById('btn-undo-point').disabled = this.tracePoints.length === 0;
+                document.getElementById('btn-finish-trace').disabled = this.tracePoints.length < 2;
+                this.setMode('tracing', `${this.tracePoints.length} road center points — save when the yellow line follows the road`);
+            }
+
+            finishTrace() {
+                if (this.tracePoints.length < 2) return;
+                const coordinates = this.tracePoints.map(point => [Number(point.lng.toFixed(7)), Number(point.lat.toFixed(7))]);
+                const feature = {
+                    type: 'Feature', geometry: { type: 'LineString', coordinates },
+                    properties: {
+                        id: this.editIndex === null ? `trace_${Date.now()}` : this.allRoads[this.editIndex].properties.id,
+                        source: 'user_traced_from_usgs_naip', review_status: 'user_traced_unverified',
+                        detected_at: new Date().toISOString(), length_m: this.calculateGeoLength(coordinates)
+                    }
+                };
+                const edited = this.editIndex !== null;
+                if (edited) this.allRoads[this.editIndex] = feature;
+                else this.allRoads.push(feature);
+                this.toggleTrace();
+                this.redrawAllRoads();
+                if (this.vectorizedRoads.length) this.displayVectorizedRoads(this.vectorizedRoads);
+                this.updateLayerCount();
+                this.setMode('ready', edited ? 'Saved corrected road trace' : 'Saved road trace to export layer');
+            }
+
+            startEditFeature(index) {
+                const feature = this.allRoads[index];
+                if (!feature) return;
+                if (this.traceMode) this.toggleTrace();
+                this.toggleTrace();
+                this.editIndex = index;
+                this.tracePoints = feature.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon));
+                this.renderTrace();
+                this.setMode('tracing', 'Drag yellow vertices or click to extend; save the corrected line');
+            }
+
+            deleteFeature(index) {
+                if (!this.allRoads[index]) return;
+                this.allRoads.splice(index, 1);
+                this.redrawAllRoads();
+                if (this.vectorizedRoads.length) this.displayVectorizedRoads(this.vectorizedRoads);
+                this.updateLayerCount();
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
+                this.setMode('ready', 'Removed line from export layer');
             }
 
             async runSamTrace() {
                 const button = document.getElementById('btn-sam');
                 button.disabled = true;
+                document.getElementById('btn-add-to-layer').disabled = true;
                 this.vectorizedRoads = [];
                 this.detectedEdges = null;
                 this.currentSource = 'usgs_naip_sam_mask_heuristic';
@@ -1195,13 +1363,17 @@
 
                 geoLines.forEach((line, idx) => {
                     const latLngs = line.map(([lon, lat]) => [lat, lon]);
-                    const polyline = L.polyline(latLngs, { color, weight, opacity: 0.8, isDetectionResult: true });
-                    polyline.on('click', () => this.showFeatureProperties(line, idx, { source: this.currentSource }));
+                    const polyline = L.polyline(latLngs, { color, weight, opacity: 0.8, isDetectionResult: true, bubblingMouseEvents: false });
+                    polyline.on('click', () => this.showFeatureProperties(line, idx, { source: this.currentSource, candidate: true }));
                     this.roadLayer.addLayer(polyline);
                 });
             }
 
             addToMainLayer() {
+                if (this.currentSource === 'usgs_naip_sam_mask_heuristic') {
+                    this.setMode('ready', 'Select each SAM proposal on the map and keep or reject it after visual review');
+                    return;
+                }
                 if (this.vectorizedRoads.length === 0) { alert('No candidates to add. Try a lower minimum line length or a different area.'); return; }
 
                 const timestamp = new Date().toISOString();
@@ -1246,8 +1418,9 @@
 
                 this.allRoads.forEach((feature, idx) => {
                     const latLngs = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-                    const polyline = L.polyline(latLngs, { color, weight, opacity: 0.9 });
-                    polyline.on('click', () => this.showFeatureProperties(feature.geometry.coordinates, idx, feature.properties));
+                    const savedColor = feature.properties.source === 'user_traced_from_usgs_naip' ? '#ffcc33' : color;
+                    const polyline = L.polyline(latLngs, { color: savedColor, weight: Math.max(weight, 4), opacity: 0.9, bubblingMouseEvents: false });
+                    polyline.on('click', () => this.showFeatureProperties(feature.geometry.coordinates, idx, { ...feature.properties, saved: true }));
                     this.roadLayer.addLayer(polyline);
                 });
             }
@@ -1285,14 +1458,45 @@
 
             showFeatureProperties(line, idx, properties = {}) {
                 const length = properties.length_m || this.calculateGeoLength(line);
+                const actions = properties.candidate
+                    ? `<button class="btn btn-primary" onclick="detector.keepCandidate(${idx})">Keep line</button> <button class="btn btn-secondary" onclick="detector.rejectCandidate(${idx})">Reject</button>`
+                    : properties.saved
+                        ? `<button class="btn btn-primary" onclick="detector.startEditFeature(${idx})">Edit trace</button> <button class="btn btn-secondary" onclick="detector.deleteFeature(${idx})">Delete</button>`
+                        : '';
                 document.getElementById('feature-props').innerHTML = `
-                    <h4>Line Candidate #${idx + 1}</h4>
+                    <h4>${properties.saved ? 'Saved Line' : 'Line Candidate'} #${idx + 1}</h4>
                     <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${length.toLocaleString()} m</span></div>
                     <div class="prop-row"><span class="prop-key">Vertices</span><span class="prop-value">${line.length}</span></div>
                     <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">${properties.source || 'USGS NAIP edge extraction'}</span></div>
                     <div class="prop-row"><span class="prop-key">Start</span><span class="prop-value">${line[0][1].toFixed(6)}, ${line[0][0].toFixed(6)}</span></div>
                     <div class="prop-row"><span class="prop-key">End</span><span class="prop-value">${line[line.length-1][1].toFixed(6)}, ${line[line.length-1][0].toFixed(6)}</span></div>
+                    ${actions}
                 `;
+            }
+
+            keepCandidate(index) {
+                const line = this.vectorizedRoads[index];
+                if (!line) return;
+                this.allRoads.push({
+                    type: 'Feature', geometry: { type: 'LineString', coordinates: line },
+                    properties: {
+                        id: `reviewed_${Date.now()}`, source: this.currentSource,
+                        review_status: 'visually_kept_unverified', detected_at: new Date().toISOString(),
+                        length_m: this.calculateGeoLength(line)
+                    }
+                });
+                this.rejectCandidate(index);
+                this.updateLayerCount();
+                this.setMode('ready', 'Kept proposal in export layer; geometry still needs validation');
+            }
+
+            rejectCandidate(index) {
+                if (!this.vectorizedRoads[index]) return;
+                this.vectorizedRoads.splice(index, 1);
+                this.redrawAllRoads();
+                this.displayVectorizedRoads(this.vectorizedRoads);
+                this.updateStats(this.vectorizedRoads);
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
             }
 
             clearAllRoads() {
@@ -1375,7 +1579,7 @@
                         wayNodes.push(`<nd ref="${nodeId}"/>`);
                         nodeId--;
                     });
-                    ways.push(`<way id="${wayId}">${wayNodes.join('')}<tag k="source" v="USGS NAIP edge extraction"/><tag k="review_status" v="unverified"/></way>`);
+                    ways.push(`<way id="${wayId}">${wayNodes.join('')}<tag k="source" v="${f.properties.source}"/><tag k="review_status" v="${f.properties.review_status}"/></way>`);
                     wayId--;
                 });
 
