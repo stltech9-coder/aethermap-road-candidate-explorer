@@ -440,8 +440,8 @@
                 </div>
                 <p id="autosave-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">Reviewed features and road proposals are saved in this browser.</p>
                 <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Feature for SAM Suggestion</button>
-                <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Compare with OSM Map Roads</button>
-                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">The click tool suggests a shape from imagery. OSM roads are existing map data for comparison, not image detections.</p>
+                <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Compare with Census Roads</button>
+                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">The click tool suggests a shape from imagery. Census roads are existing map data for comparison, not image detections.</p>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
                 <p id="trace-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
@@ -449,9 +449,9 @@
                     <button class="btn btn-secondary" id="btn-undo-point" disabled>↶ Undo Point</button>
                     <button class="btn btn-primary" id="btn-finish-trace" disabled>✓ Save Trace</button>
                 </div>
-                <button class="btn btn-secondary" id="btn-osm" disabled>Load OSM Snapping Reference</button>
-                <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby OSM roads</label>
-                <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">OSM reference requires the local launcher.</p>
+                <button class="btn btn-secondary" id="btn-osm" disabled>Load Census Snapping Reference</button>
+                <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby Census roads</label>
+                <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Census reference requires the local launcher.</p>
                 <details style="margin-top:12px;color:#aeb3c5;font-size:11px;"><summary>Generic image-line diagnostics (not feature classified)</summary>
                     <button class="btn btn-secondary" id="btn-detect">Find Line Candidates</button>
                     <button class="btn btn-secondary" id="btn-vectorize">Vectorize Candidates</button>
@@ -463,7 +463,7 @@
 
             <div class="section">
                 <div class="section-title">Imagery &amp; map</div>
-                <p style="font-size:12px;line-height:1.5;color:#aeb3c5;">Map and analysis: USGS NAIP aerial imagery (contiguous U.S.). OpenStreetMap remains visible while imagery loads or outside coverage.</p>
+                <p style="font-size:12px;line-height:1.5;color:#aeb3c5;">Map and analysis: USGS NAIP aerial imagery (contiguous U.S.). USGS Topo remains visible while imagery loads or outside coverage.</p>
             </div>
 
             <div class="section">
@@ -545,12 +545,16 @@
                 <h4>No feature selected</h4>
             </div>
 
-            <div class="section-title">Export Layer</div>
+            <div class="section-title">Save and Export Traces</div>
+            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 9px;">Save Trace or Keep road adds a feature to the reviewed layer. Work is saved in this browser. Download a GeoJSON file for a portable copy.</p>
+            <button class="btn btn-primary" id="export-all-traces">⬇️ Export All Traces (GeoJSON)</button>
+            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Includes saved features and automatic road proposals, each marked with its review status.</p>
+            <div class="section-title">Export Reviewed Features Only</div>
             <div class="export-grid">
                 <button class="btn btn-secondary export-btn" id="export-geojson">📄 GeoJSON</button>
                 <button class="btn btn-secondary export-btn" id="export-kml">🌐 KML</button>
                 <button class="btn btn-secondary export-btn" id="export-wkt">📝 WKT</button>
-                <button class="btn btn-secondary export-btn" id="export-osm">🗺️ OSM XML</button>
+                <button class="btn btn-secondary export-btn" id="export-osm">🗺️ OSM XML File</button>
             </div>
 
             <div style="margin-top: 16px;">
@@ -606,9 +610,9 @@
             initMap() {
                 this.map = L.map('map', { center: [33.4484, -112.0740], zoom: 18 });
 
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19,
-                    attribution: '&copy; OpenStreetMap contributors'
+                L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19, maxNativeZoom: 16,
+                    attribution: 'USGS The National Map'
                 }).addTo(this.map);
                 this.visibleImagery = null;
                 this.pendingImagery = null;
@@ -621,7 +625,7 @@
                 this.promptLayer = L.layerGroup().addTo(this.map);
                 this.mappedRoadLayer = L.layerGroup().addTo(this.map);
                 this.modelRoadLayer = L.layerGroup().addTo(this.map);
-                this.map.attributionControl.addAttribution('OSM roads: © OpenStreetMap contributors (ODbL)');
+                this.map.attributionControl.addAttribution('Road reference: U.S. Census Bureau TIGERweb');
 
                 this.map.on('mousemove', (e) => {
                     document.getElementById('coords-display').textContent =
@@ -694,7 +698,7 @@
                     if (request !== this.imageryRequest) return;
                     this.map.removeLayer(overlay);
                     this.pendingImagery = null;
-                    status.textContent = 'Imagery unavailable; OpenStreetMap fallback';
+                    status.textContent = 'Imagery unavailable; USGS Topo fallback';
                 });
                 overlay.addTo(this.map);
             }
@@ -740,6 +744,7 @@
                 document.getElementById('capture-size').addEventListener('change', () => { this.updateDetectionArea(); this.saveWork(); });
 
                 document.getElementById('export-geojson').addEventListener('click', () => this.exportLayer('geojson'));
+                document.getElementById('export-all-traces').addEventListener('click', () => this.exportAllTraces());
                 document.getElementById('export-kml').addEventListener('click', () => this.exportLayer('kml'));
                 document.getElementById('export-wkt').addEventListener('click', () => this.exportLayer('wkt'));
                 document.getElementById('export-osm').addEventListener('click', () => this.exportLayer('osm'));
@@ -905,7 +910,7 @@
                     document.getElementById('btn-sam-point').disabled = !info.available;
                     document.getElementById('btn-mapped-roads').disabled = false;
                     document.getElementById('btn-osm').disabled = false;
-                    document.getElementById('osm-status').textContent = 'Load current-view OSM roads as a blue reference layer; reference roads are not exported.';
+                    document.getElementById('osm-status').textContent = 'Load current-view Census roads as a blue reference layer; reference roads are not exported.';
                     status.textContent = info.available
                         ? `${info.model} available locally (${info.device}). First scan may take several minutes. Results need review.`
                         : `SAM unavailable: ${info.reason}`;
@@ -1108,16 +1113,16 @@
                 this.setMode('detecting', 'Loading mapped road centerlines for the aerial image area…');
                 try {
                     const bbox = [b.minLon, b.minLat, b.maxLon, b.maxLat];
-                    const response = await fetch(`/api/osm-roads?bbox=${encodeURIComponent(bbox.join(','))}`);
+                    const response = await fetch(`/api/reference-roads?bbox=${encodeURIComponent(bbox.join(','))}`);
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
                     const roadTypes = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'living_street', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link']);
                     this.mappedRoadCandidates = data.features
                         .filter(f => roadTypes.has(f.properties.highway))
-                        .flatMap(f => this.clipRoadLine(f.geometry.coordinates, b).map(coordinates => ({ coordinates, highway: f.properties.highway, name: f.properties.name, osm_id: f.properties.osm_id })))
+                        .flatMap(f => this.clipRoadLine(f.geometry.coordinates, b).map(coordinates => ({ coordinates, highway: f.properties.highway, name: f.properties.name, census_id: f.properties.census_id })))
                         .filter(f => this.calculateGeoLength(f.coordinates) >= 10);
                     this.drawMappedRoads();
-                    this.setMode('ready', `${this.mappedRoadCandidates.length} OSM-mapped road segments over the aerial image. These are map data, not image detections; review against imagery.`);
+                    this.setMode('ready', `${this.mappedRoadCandidates.length} Census road segments over the aerial image. These are map data, not image detections; review against imagery.`);
                 } catch (error) {
                     this.setMode('error', error.message);
                 }
@@ -1139,7 +1144,7 @@
                     <h4>Mapped road #${index + 1}</h4>
                     <div class="prop-row"><span class="prop-key">Type</span><span class="prop-value">${road.highway}</span></div>
                     <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${this.calculateGeoLength(road.coordinates)} m</span></div>
-                    <p style="font-size:11px;line-height:1.4;">From OpenStreetMap. Compare the red line with the aerial road before keeping it.</p>
+                    <p style="font-size:11px;line-height:1.4;">From U.S. Census TIGERweb. Compare the red line with the aerial road before keeping it.</p>
                     <button class="btn btn-primary" onclick="detector.keepMappedRoad(${index})">Keep road</button>
                     <button class="btn btn-secondary" onclick="detector.rejectMappedRoad(${index})">Reject</button>`;
             }
@@ -1148,15 +1153,15 @@
                 const road = this.mappedRoadCandidates[index];
                 if (!road) return;
                 this.allRoads.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: road.coordinates }, properties: {
-                    id: `osm_${road.osm_id}_${Date.now()}`, feature_type: 'road', highway: road.highway,
-                    source: 'openstreetmap_reference_over_usgs_naip', review_status: 'visually_kept_unverified',
+                    id: `census_${road.census_id}_${Date.now()}`, feature_type: 'road', highway: road.highway,
+                    source: 'census_tigerweb_reference_over_usgs_naip', review_status: 'visually_kept_unverified',
                     length_m: this.calculateGeoLength(road.coordinates), detected_at: new Date().toISOString()
                 }});
                 this.rejectMappedRoad(index);
                 this.redrawAllRoads();
                 this.updateLayerCount();
                 this.saveWork();
-                this.setMode('ready', 'Saved reviewed OSM road; edit geometry if it does not follow the aerial image');
+                this.setMode('ready', 'Saved reviewed Census road; edit geometry if it does not follow the aerial image');
             }
 
             rejectMappedRoad(index) {
@@ -1312,19 +1317,20 @@
                 const status = document.getElementById('osm-status');
                 const bounds = this.map.getBounds();
                 const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-                status.textContent = 'Loading OSM road geometry for the current view…';
+                status.textContent = 'Loading Census road geometry for the current view…';
                 try {
-                    const response = await fetch(`/api/osm-roads?bbox=${encodeURIComponent(bbox.join(','))}`);
+                    const response = await fetch(`/api/reference-roads?bbox=${encodeURIComponent(bbox.join(','))}`);
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
                     this.osmLayer.clearLayers();
-                    this.osmRoads = data.features.map(feature => feature.geometry.coordinates);
+                    this.osmRoads = data.features.flatMap(feature => this.clipRoadLine(feature.geometry.coordinates,
+                        { minLon: bbox[0], minLat: bbox[1], maxLon: bbox[2], maxLat: bbox[3] }));
                     for (const line of this.osmRoads) {
                         L.polyline(line.map(([lon, lat]) => [lat, lon]), {
                             color: '#3189ff', weight: 2, opacity: 0.9, interactive: false
                         }).addTo(this.osmLayer);
                     }
-                    status.textContent = `${this.osmRoads.length} existing OSM roads shown in blue. Trace new roads in yellow; OSM is reference only.`;
+                    status.textContent = `${this.osmRoads.length} existing Census road segments shown in blue. Trace new roads in yellow; Census is reference only.`;
                 } catch (error) {
                     status.textContent = error.message;
                 }
@@ -2061,11 +2067,38 @@
                         break;
                 }
 
+                this.downloadFile(content, filename, mimeType);
+            }
+
+            exportAllTraces() {
+                const proposals = this.modelRoadCandidates.map((road, index) => ({
+                    type: 'Feature',
+                    geometry: { type: 'LineString', coordinates: road.coordinates },
+                    properties: {
+                        id: `proposal_${index + 1}`, feature_type: 'road', source: road.source,
+                        review_status: 'model_proposal_unreviewed', model_score: road.confidence,
+                        scan_key: road.scanKey || null, length_m: this.calculateGeoLength(road.coordinates)
+                    }
+                }));
+                const features = [...this.allRoads, ...proposals];
+                if (!features.length) { alert('No traces to export yet. Trace a feature or run a road scan first.'); return; }
+                const geojson = {
+                    type: 'FeatureCollection',
+                    properties: { name: 'AetherMap traces', created: new Date().toISOString(),
+                        reviewed_count: this.allRoads.length, proposal_count: proposals.length },
+                    features
+                };
+                this.downloadFile(JSON.stringify(geojson, null, 2), 'aethermap_all_traces.geojson', 'application/geo+json');
+                this.setMode('ready', `Exported ${this.allRoads.length} saved features and ${proposals.length} road proposals`);
+            }
+
+            downloadFile(content, filename, mimeType) {
                 const blob = new Blob([content], { type: mimeType });
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
                 a.download = filename;
                 a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 60000);
             }
 
             toKML(geojson) {

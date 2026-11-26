@@ -9,8 +9,8 @@ Double-click `start-local-sam.bat` and open `http://127.0.0.1:8767/`. Port **876
 1. Pan and zoom to a contiguous U.S. location. The map and analysis image use [USGS NAIP aerial imagery](https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer).
 2. Select **Road centerline**, then **Trace Roads with SAM-Road (Local)**. Its road graph is predicted from aerial imagery. Solid purple proposals appear as the image and graph tiles finish; click each line to keep or reject it. **Quick Road Preview (Lower Detail)** runs a smaller 256-pixel segmentation model and shows dashed amber proposals. Select a kept line to edit its vertices.
 3. For a roof, select **Building footprint**. Trace its boundary on the map, or click it with the local SAM prompt tool. The SAM result needs visual review because SAM itself has no road/building class label.
-4. The separate red **Show Mapped Roads Over Imagery** action displays OpenStreetMap centerlines as reference proposals. These come from map data, not image detection. A blue OSM reference layer can also be loaded for manual snapping.
-5. Export reviewed features to GeoJSON, KML, WKT, or OSM XML. Exports retain source and review status. OSM XML does not assign a `highway` tag to model predictions.
+4. **Compare with Census Roads** displays red U.S. Census TIGERweb centerlines as reference proposals. These come from map data, not image detection. A blue Census reference layer can also be loaded for manual snapping. Census roads may be offset from the imagery and need review.
+5. **Save Trace** stores a hand-drawn line or footprint in the reviewed layer. **Keep road** does the same for a selected model proposal. **Export All Traces (GeoJSON)** downloads both saved features and unreviewed automatic road proposals, each with its source and review status. The other export buttons download reviewed features only in GeoJSON, KML, WKT, or OSM XML. OSM XML does not assign a `highway` tag to model predictions.
 
 Reviewed features and unreviewed road proposals autosave in this browser and reappear after refresh, including when you return to an earlier map area. A scan of the same area and model uses its saved proposals. Browser storage is scoped to the page address and is not a cloud backup; export GeoJSON for a portable copy. The SAM-Road progress panel reports completed image and graph tiles, with an indeterminate bar while the model loads.
 
@@ -28,7 +28,7 @@ For inference, the app prefers `~/.cache/aethermap/cityscale_inference_state.pt`
 
 The supplied `BUILDING_FOOTPRINT_EXTRACTION_-_INDIA.dlpk` is an ArcGIS package trained on India imagery and is **not loaded by this web app**. A separate local `usa_building_footprints.dlpk` was found, but automatic building extraction still needs an adapter and validation. [SAM-Road++](https://github.com/earth-insights/samroadplus) remains a possible future benchmark if the authors release compatible trained weights.
 
-USGS imagery is fetched on demand and not committed to GitHub. The model weights are cached outside the repository. The public GitHub Pages site cannot run the Python endpoints; manual road and building tracing remain available there. Leaflet loads from a public CDN, with OpenStreetMap as the fallback map while NAIP loads or outside coverage.
+USGS imagery is fetched on demand and not committed to GitHub. The model weights are cached outside the repository. The public GitHub Pages site cannot run the Python endpoints; manual road and building tracing remain available there. Leaflet loads from a public CDN, with [USGS Topo](https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer) as the fallback map while NAIP loads or outside coverage. Census road reference uses [TIGERweb](https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_PhysicalFeatures/MapServer/layers) through the local service; no OpenStreetMap tile or road request is needed.
 
 ## Attribution
 

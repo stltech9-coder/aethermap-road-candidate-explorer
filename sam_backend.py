@@ -11,7 +11,6 @@ import json
 import math
 import os
 import threading
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from queue import Queue
 
@@ -231,9 +230,9 @@ def samroad_status():
     return jsonify(available=available, reason=reason, model="SAM-Road CityScale ViT-B", device="CUDA if available, otherwise CPU")
 
 
-@app.get("/api/osm-roads")
-def osm_roads():
-    """Small-area reference geometry; this endpoint never edits OSM."""
+@app.get("/api/reference-roads")
+def reference_roads():
+    """Small-area Census TIGERweb roads for visual comparison and snapping."""
     import requests
 
     try:
@@ -244,33 +243,44 @@ def osm_roads():
         if not (-180 <= west < east <= 180 and -85 <= south < north <= 85):
             raise ValueError("Invalid bounding box")
         if east - west > 0.03 or north - south > 0.03:
-            raise ValueError("Zoom in before loading OSM reference roads")
+            raise ValueError("Zoom in before loading Census reference roads")
     except (KeyError, ValueError) as exc:
         return jsonify(error=str(exc)), 400
 
     try:
-        response = requests.get(
-            "https://api.openstreetmap.org/api/0.6/map",
-            params={"bbox": ",".join(map(str, bbox))},
-            headers={"User-Agent": "AetherMapRoadCandidateExplorer/0.2 (local review tool)"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        if len(response.content) > 12_000_000:
-            raise ValueError("OSM response too large; zoom in")
-        root = ET.fromstring(response.content)
-        nodes = {node.get("id"): [float(node.get("lon")), float(node.get("lat"))] for node in root.findall("node")}
         features = []
-        for way in root.findall("way"):
-            tags = {tag.get("k"): tag.get("v") for tag in way.findall("tag")}
-            if "highway" not in tags or tags["highway"] in {"footway", "path", "cycleway", "steps", "pedestrian", "proposed", "construction"}:
-                continue
-            coords = [nodes[nd.get("ref")] for nd in way.findall("nd") if nd.get("ref") in nodes]
-            if len(coords) >= 2:
-                features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords}, "properties": {"osm_id": way.get("id"), "highway": tags["highway"], "name": tags.get("name", "")}})
-        return jsonify(type="FeatureCollection", features=features, source="OpenStreetMap API 0.6", license="ODbL")
-    except (requests.RequestException, ET.ParseError, ValueError) as exc:
-        return jsonify(error=f"OSM reference unavailable: {exc}"), 502
+        base = "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_PhysicalFeatures/MapServer"
+        for layer_id, road_type in ((1, "primary"), (3, "secondary"), (5, "residential")):
+            response = requests.get(
+                f"{base}/{layer_id}/query",
+                params={"f": "geojson", "where": "1=1", "geometry": ",".join(map(str, bbox)),
+                        "geometryType": "esriGeometryEnvelope", "inSR": "4326", "outSR": "4326",
+                        "spatialRel": "esriSpatialRelIntersects", "returnGeometry": "true",
+                        "outFields": "OBJECTID,NAME,MTFCC"},
+                headers={"User-Agent": "AetherMapFeatureTracer/0.3"}, timeout=30,
+            )
+            response.raise_for_status()
+            if len(response.content) > 12_000_000:
+                raise ValueError("Census response too large; zoom in")
+            data = response.json()
+            if data.get("type") != "FeatureCollection":
+                raise ValueError(f"Census road layer {layer_id} returned an invalid response")
+            for feature in data.get("features", []):
+                geometry = feature.get("geometry") or {}
+                lines = [geometry.get("coordinates")] if geometry.get("type") == "LineString" else (
+                    geometry.get("coordinates", []) if geometry.get("type") == "MultiLineString" else [])
+                props = feature.get("properties") or {}
+                for line in lines:
+                    if line and len(line) >= 2:
+                        features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": line},
+                                         "properties": {"census_id": props.get("OBJECTID") or feature.get("id"),
+                                                        "highway": road_type, "name": props.get("NAME") or "",
+                                                        "mtfcc": props.get("MTFCC")}})
+            if len(features) > 5000:
+                raise ValueError("Too many Census roads; zoom in")
+        return jsonify(type="FeatureCollection", features=features, source="U.S. Census Bureau TIGERweb")
+    except (requests.RequestException, ValueError) as exc:
+        return jsonify(error=f"Census road reference unavailable: {exc}"), 502
 
 
 @app.post("/api/sam-trace")
