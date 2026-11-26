@@ -2,6 +2,8 @@
 
 A browser-based image-processing prototype that turns visible linear features in aerial imagery into **unverified** geospatial line candidates. Built as a small proof of work from Randall Morales's AetherMap prototype.
 
+**[Open the live demo](https://stltech9-coder.github.io/aethermap-road-candidate-explorer/)**
+
 ## Try it
 
 1. Open `index.html` through a static web server or the GitHub Pages demo.
