@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AetherMap Road Candidate Explorer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 340px 1fr 380px;
+            height: 100vh;
+        }
+
+        .control-panel {
+            background: linear-gradient(180deg, #12121a 0%, #0d0d12 100%);
+            border-right: 1px solid #2a2a3a;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #2a2a3a;
+        }
+
+        .logo-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #00d4aa, #0088ff);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+
+        .logo-text {
+            font-size: 18px;
+            font-weight: 600;
+            background: linear-gradient(90deg, #00d4aa, #0088ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-subtitle { font-size: 11px; color: #888; }
+
+        .section { margin-bottom: 20px; }
+
+        .section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #2a2a3a;
+        }
+
+        .input-group { margin-bottom: 12px; }
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 6px;
+        }
+
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 10px 12px;
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 13px;
+        }
+
+        input:focus, select:focus { outline: none; border-color: #00d4aa; }
+
+        .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        .slider-group { margin-bottom: 16px; }
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 8px;
+        }
+
+        .slider-value { color: #00d4aa; font-weight: 500; }
+
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #2a2a3a;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d4aa;
+            cursor: pointer;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4aa, #00a080);
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 212, 170, 0.3);
+        }
+
+        .btn-secondary { background: #2a2a3a; color: #e0e0e0; }
+        .btn-secondary:hover { background: #3a3a4a; }
+        .btn-accent { background: linear-gradient(135deg, #0088ff, #0066cc); color: #fff; }
+        .btn-danger { background: linear-gradient(135deg, #ff4444, #cc0000); color: #fff; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        .map-container { position: relative; }
+        #map { width: 100%; height: 100%; background: #0a0a0f; }
+
+        .map-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(18, 18, 26, 0.95);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #2a2a3a;
+            z-index: 1000;
+        }
+
+        .coords-display {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: #00d4aa;
+        }
+
+        .processing-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .processing-overlay.active { display: flex; }
+
+        .processing-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid #2a2a3a;
+            border-top-color: #00d4aa;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .processing-text { margin-top: 20px; font-size: 16px; color: #00d4aa; }
+        .processing-detail { margin-top: 8px; font-size: 12px; color: #888; }
+
+        #capture-canvas, #process-canvas { display: none; }
+
+        .results-panel {
+            background: linear-gradient(180deg, #12121a 0%, #0d0d12 100%);
+            border-left: 1px solid #2a2a3a;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #1a1a24;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #2a2a3a;
+        }
+
+        .layer-item.active { border-color: #00d4aa; }
+        .layer-color { width: 16px; height: 16px; border-radius: 4px; border: 2px solid #fff; }
+        .layer-info { flex: 1; }
+        .layer-name { font-size: 13px; font-weight: 500; }
+        .layer-count { font-size: 11px; color: #888; }
+
+        .layer-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 6px;
+            background: #2a2a3a;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .layer-btn:hover { background: #3a3a4a; color: #fff; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+
+        .stat-card {
+            background: #1a1a24;
+            border-radius: 8px;
+            padding: 14px;
+            border: 1px solid #2a2a3a;
+        }
+
+        .stat-label { font-size: 10px; text-transform: uppercase; color: #888; margin-bottom: 4px; }
+        .stat-value { font-size: 20px; font-weight: 600; color: #00d4aa; }
+        .stat-unit { font-size: 12px; color: #888; margin-left: 4px; }
+
+        .feature-props {
+            background: #1a1a24;
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 20px;
+            border: 1px solid #2a2a3a;
+        }
+
+        .feature-props h4 { font-size: 12px; color: #888; margin-bottom: 10px; }
+
+        .prop-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #2a2a3a;
+            font-size: 12px;
+        }
+
+        .prop-row:last-child { border-bottom: none; }
+        .prop-key { color: #888; }
+        .prop-value { color: #e0e0e0; }
+
+        .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .export-btn { padding: 10px; font-size: 12px; }
+
+        .preview-canvas-wrap {
+            background: #1a1a24;
+            border-radius: 8px;
+            padding: 10px;
+            border: 1px solid #2a2a3a;
+            margin-bottom: 20px;
+        }
+
+        #preview-canvas { width: 100%; height: 200px; border-radius: 4px; }
+
+        .mode-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: #1a1a24;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 1px solid #2a2a3a;
+        }
+
+        .mode-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #888;
+        }
+
+        .mode-dot.active { background: #00d4aa; box-shadow: 0 0 10px #00d4aa; }
+        .mode-text { font-size: 12px; color: #aaa; }
+
+        .leaflet-control-zoom { border: none !important; }
+        .leaflet-control-zoom a {
+            background: #1a1a24 !important;
+            color: #e0e0e0 !important;
+            border: 1px solid #2a2a3a !important;
+        }
+        .leaflet-control-zoom a:hover { background: #2a2a3a !important; }
+        @media (max-width: 1050px) {
+            body { height: auto; overflow: auto; }
+            .container { grid-template-columns: minmax(280px, 340px) 1fr; height: auto; }
+            .control-panel { min-height: 600px; }
+            .map-container { min-height: 600px; }
+            .results-panel { grid-column: 1 / -1; border-left: 0; border-top: 1px solid #2a2a3a; }
+        }
+        @media (max-width: 700px) {
+            .container { display: block; }
+            .control-panel, .results-panel { min-height: auto; overflow: visible; }
+            .map-container { min-height: 460px; height: 60vh; }
+            .map-overlay { top: 8px; left: 8px; padding: 7px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="control-panel">
+            <div class="logo">
+                <div class="logo-icon">🛣️</div>
+                <div>
+                    <div class="logo-text">AetherMap</div>
+                    <div class="logo-subtitle">Road Candidate Explorer</div>
+                </div>
+            </div>
+
+            <div class="mode-indicator">
+                <div class="mode-dot" id="mode-dot"></div>
+                <span class="mode-text" id="mode-text">Ready — click a U.S. location to set the analysis area</span>
+            </div>
+            <p style="font-size:12px;line-height:1.5;color:#aeb3c5;margin:-8px 0 18px;">Exploratory edge extraction from USGS NAIP imagery. Results are unverified candidates, not a trained AI model or authoritative road data.</p>
+
+            <div class="section">
+                <div class="section-title">Detection Area</div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Latitude</label>
+                        <input type="number" id="center-lat" value="33.4484" step="0.0001">
+                    </div>
+                    <div class="input-group">
+                        <label>Longitude</label>
+                        <input type="number" id="center-lon" value="-112.0740" step="0.0001">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>Capture Size (pixels)</label>
+                    <select id="capture-size">
+                        <option value="512" selected>512 x 512</option>
+                        <option value="1024">1024 x 1024</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Detection Parameters</div>
+
+                <div class="slider-group">
+                    <label>
+                        <span>Edge Sensitivity</span>
+                        <span class="slider-value" id="sensitivity-value">50</span>
+                    </label>
+                    <input type="range" id="sensitivity" min="10" max="100" value="50">
+                </div>
+
+                <div class="slider-group">
+                    <label>
+                        <span>Min Road Length (px)</span>
+                        <span class="slider-value" id="min-length-value">30</span>
+                    </label>
+                    <input type="range" id="min-length" min="10" max="100" value="30">
+                </div>
+
+                <div class="slider-group">
+                    <label>
+                        <span>Line Simplification</span>
+                        <span class="slider-value" id="simplify-value">2</span>
+                    </label>
+                    <input type="range" id="simplify" min="1" max="10" value="2">
+                </div>
+
+                <div class="slider-group">
+                    <label>
+                        <span>Edge Joining (px)</span>
+                        <span class="slider-value" id="width-value">3</span>
+                    </label>
+                    <input type="range" id="width-filter" min="1" max="20" value="3">
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Actions</div>
+                <button class="btn btn-primary" id="btn-detect">🔍 Find Line Candidates</button>
+                <button class="btn btn-accent" id="btn-vectorize">📐 Vectorize Candidates</button>
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="btn-preview">👁️ Preview</button>
+                    <button class="btn btn-secondary" id="btn-add-to-layer">➕ Add to Layer</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Imagery &amp; map</div>
+                <p style="font-size:12px;line-height:1.5;color:#aeb3c5;">Analysis image: USGS NAIP (contiguous U.S.). Background map: OpenStreetMap. Imagery is requested only for the selected area.</p>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Layer Style</div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Candidate Color</label>
+                        <input type="color" id="road-color" value="#00ff88" style="width:100%; height:36px; border-radius:6px; border:1px solid #2a2a3a;">
+                    </div>
+                    <div class="input-group">
+                        <label>Line Weight</label>
+                        <input type="number" id="line-weight" value="3" min="1" max="10">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-overlay">
+                <div class="coords-display" id="coords-display">Lat: ---, Lon: --- | Zoom: --</div>
+            </div>
+
+            <div class="processing-overlay" id="processing-overlay">
+                <div class="processing-spinner"></div>
+                <div class="processing-text" id="processing-text">Processing...</div>
+                <div class="processing-detail" id="processing-detail">Capturing imagery</div>
+            </div>
+
+            <canvas id="capture-canvas"></canvas>
+            <canvas id="process-canvas"></canvas>
+        </div>
+
+        <div class="results-panel">
+            <div class="section-title">Edge Preview</div>
+            <div class="preview-canvas-wrap">
+                <canvas id="preview-canvas"></canvas>
+            </div>
+
+            <div class="section-title">Statistics</div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Line Candidates</div>
+                    <div class="stat-value" id="stat-roads">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Length</div>
+                    <div class="stat-value" id="stat-length">0<span class="stat-unit">m</span></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Vertices</div>
+                    <div class="stat-value" id="stat-vertices">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Area Covered</div>
+                    <div class="stat-value" id="stat-area">0<span class="stat-unit">km²</span></div>
+                </div>
+            </div>
+
+            <div class="section-title">Candidate Layer</div>
+            <div id="layer-list">
+                <div class="layer-item active">
+                    <input type="checkbox" checked onchange="detector.toggleLayerVisibility(this.checked)">
+                    <div class="layer-color" style="background: #00ff88;"></div>
+                    <div class="layer-info">
+                        <div class="layer-name">Unverified Lines</div>
+                        <div class="layer-count" id="layer-count">0 features</div>
+                    </div>
+                    <div style="display:flex; gap:4px;">
+                        <button class="layer-btn" onclick="detector.zoomToLayer()">🔍</button>
+                        <button class="layer-btn" onclick="detector.clearAllRoads()">🗑️</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-title">Selected Feature</div>
+            <div class="feature-props" id="feature-props">
+                <h4>No feature selected</h4>
+            </div>
+
+            <div class="section-title">Export Layer</div>
+            <div class="export-grid">
+                <button class="btn btn-secondary export-btn" id="export-geojson">📄 GeoJSON</button>
+                <button class="btn btn-secondary export-btn" id="export-kml">🌐 KML</button>
+                <button class="btn btn-secondary export-btn" id="export-wkt">📝 WKT</button>
+                <button class="btn btn-secondary export-btn" id="export-osm">🗺️ OSM XML</button>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <button class="btn btn-danger" id="btn-clear-layer">🗑️ Clear All Roads</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        class RoadDetectorEngine {
+            constructor() {
+                this.map = null;
+                this.roadLayer = null;
+                this.capturedImage = null;
+                this.detectedEdges = null;
+                this.vectorizedRoads = [];
+                this.allRoads = [];
+                this.captureBounds = null;
+
+                this.captureCanvas = document.getElementById('capture-canvas');
+                this.processCanvas = document.getElementById('process-canvas');
+                this.previewCanvas = document.getElementById('preview-canvas');
+                this.captureCtx = this.captureCanvas.getContext('2d');
+                this.processCtx = this.processCanvas.getContext('2d');
+                this.previewCtx = this.previewCanvas.getContext('2d', { willReadFrequently: true });
+
+                this.initMap();
+                this.initEventListeners();
+                this.initSliders();
+            }
+
+            initMap() {
+                this.map = L.map('map', { center: [33.4484, -112.0740], zoom: 18 });
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(this.map);
+                this.imageryOverlay = null;
+                this.roadLayer = L.layerGroup().addTo(this.map);
+                this.areaLayer = L.layerGroup().addTo(this.map);
+
+                this.map.on('mousemove', (e) => {
+                    document.getElementById('coords-display').textContent =
+                        `Lat: ${e.latlng.lat.toFixed(6)}, Lon: ${e.latlng.lng.toFixed(6)} | Zoom: ${this.map.getZoom()}`;
+                });
+
+                this.map.on('click', (e) => {
+                    document.getElementById('center-lat').value = e.latlng.lat.toFixed(6);
+                    document.getElementById('center-lon').value = e.latlng.lng.toFixed(6);
+                    this.updateDetectionArea();
+                });
+
+                this.updateDetectionArea();
+            }
+
+            initSliders() {
+                ['sensitivity', 'min-length', 'simplify', 'width-filter'].forEach(id => {
+                    const slider = document.getElementById(id);
+                    const valueId = id.replace('-filter', '') + '-value';
+                    const valueDisplay = document.getElementById(valueId);
+                    if (slider && valueDisplay) {
+                        slider.addEventListener('input', () => valueDisplay.textContent = slider.value);
+                    }
+                });
+            }
+
+            initEventListeners() {
+                document.getElementById('btn-detect').addEventListener('click', () => this.runDetection());
+                document.getElementById('btn-vectorize').addEventListener('click', () => this.vectorizeAndDisplay());
+                document.getElementById('btn-preview').addEventListener('click', () => this.previewDetection());
+                document.getElementById('btn-add-to-layer').addEventListener('click', () => this.addToMainLayer());
+                document.getElementById('btn-clear-layer').addEventListener('click', () => this.clearAllRoads());
+
+                ['center-lat', 'center-lon'].forEach(id => {
+                    document.getElementById(id).addEventListener('change', () => {
+                        const lat = parseFloat(document.getElementById('center-lat').value);
+                        const lon = parseFloat(document.getElementById('center-lon').value);
+                        if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+                            this.map.panTo([lat, lon]);
+                            this.updateDetectionArea();
+                        }
+                    });
+                });
+                document.getElementById('capture-size').addEventListener('change', () => this.updateDetectionArea());
+
+                document.getElementById('export-geojson').addEventListener('click', () => this.exportLayer('geojson'));
+                document.getElementById('export-kml').addEventListener('click', () => this.exportLayer('kml'));
+                document.getElementById('export-wkt').addEventListener('click', () => this.exportLayer('wkt'));
+                document.getElementById('export-osm').addEventListener('click', () => this.exportLayer('osm'));
+
+                document.getElementById('road-color').addEventListener('change', () => this.updateLayerStyle());
+                document.getElementById('line-weight').addEventListener('change', () => this.updateLayerStyle());
+            }
+
+            updateDetectionArea() {
+                const lat = parseFloat(document.getElementById('center-lat').value);
+                const lon = parseFloat(document.getElementById('center-lon').value);
+                const size = parseInt(document.getElementById('capture-size').value);
+
+                if (isNaN(lat) || isNaN(lon)) return;
+
+                this.areaLayer.clearLayers();
+
+                const zoom = this.map.getZoom();
+                const metersPerPixel = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+                const halfSizeMeters = (size / 2) * metersPerPixel;
+
+                const latOffset = halfSizeMeters / 111320;
+                const lonOffset = halfSizeMeters / (111320 * Math.cos(lat * Math.PI / 180));
+
+                this.captureBounds = { minLat: lat - latOffset, maxLat: lat + latOffset, minLon: lon - lonOffset, maxLon: lon + lonOffset, width: size, height: size };
+
+                const rect = L.rectangle([[lat - latOffset, lon - lonOffset], [lat + latOffset, lon + lonOffset]], {
+                    color: '#00d4aa', fillColor: '#00d4aa', fillOpacity: 0.1, weight: 2, dashArray: '8, 4'
+                });
+
+                this.areaLayer.addLayer(rect);
+
+                const areaKm2 = (halfSizeMeters * 2 / 1000) ** 2;
+                document.getElementById('stat-area').innerHTML = areaKm2.toFixed(3) + '<span class="stat-unit">km²</span>';
+            }
+
+            setMode(mode, detail = '') {
+                document.getElementById('mode-dot').classList.toggle('active', mode !== 'ready');
+                document.getElementById('mode-text').textContent = detail || mode;
+            }
+
+            showProcessing(show, text = 'Processing...', detail = '') {
+                document.getElementById('processing-overlay').classList.toggle('active', show);
+                document.getElementById('processing-text').textContent = text;
+                document.getElementById('processing-detail').textContent = detail;
+            }
+
+            async runDetection() {
+                this.detectedEdges = null;
+                this.vectorizedRoads = [];
+                this.setMode('detecting', 'Requesting USGS imagery...');
+                this.showProcessing(true, 'Finding candidates', 'Requesting USGS NAIP imagery...');
+
+                try {
+                    await this.captureMapArea();
+                    this.showProcessing(true, 'Finding candidates', 'Running edge detection...');
+                    await this.detectEdges();
+                    this.showProcessing(true, 'Finding candidates', 'Generating preview...');
+                    this.showEdgePreview();
+                    this.showProcessing(false);
+                    this.setMode('detected', 'Preview ready — vectorize and review candidate lines');
+                } catch (error) {
+                    console.error('Detection failed:', error);
+                    this.showProcessing(false);
+                    this.setMode('error', 'Analysis failed: ' + error.message);
+                }
+            }
+
+            async captureMapArea() {
+                const size = parseInt(document.getElementById('capture-size').value, 10);
+                const lat = parseFloat(document.getElementById('center-lat').value);
+                const lon = parseFloat(document.getElementById('center-lon').value);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < 24 || lat > 50 || lon < -125 || lon > -66) {
+                    throw new Error('Choose a location in the contiguous United States.');
+                }
+                this.updateDetectionArea();
+                const { minLon, minLat, maxLon, maxLat } = this.captureBounds;
+                const params = new URLSearchParams({
+                    bbox: [minLon, minLat, maxLon, maxLat].join(','),
+                    bboxSR: '4326', imageSR: '4326',
+                    size: `${size},${size}`, format: 'jpg', f: 'image'
+                });
+                const url = `https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?${params}`;
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                await new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => reject(new Error('USGS imagery request timed out.')), 20000);
+                    img.onload = () => { clearTimeout(timer); resolve(); };
+                    img.onerror = () => { clearTimeout(timer); reject(new Error('USGS imagery is unavailable for this area.')); };
+                    img.src = url;
+                });
+                this.captureCanvas.width = size;
+                this.captureCanvas.height = size;
+                this.processCanvas.width = size;
+                this.processCanvas.height = size;
+                this.captureCtx.drawImage(img, 0, 0, size, size);
+                this.capturedImage = this.captureCtx.getImageData(0, 0, size, size);
+                if (this.imageryOverlay) this.map.removeLayer(this.imageryOverlay);
+                this.imageryOverlay = L.imageOverlay(url, [[minLat, minLon], [maxLat, maxLon]], { opacity: 0.9 }).addTo(this.map);
+                if (!this.imageryCreditAdded) {
+                    this.map.attributionControl.addAttribution('Analysis image: USGS NAIP');
+                    this.imageryCreditAdded = true;
+                }
+                this.roadLayer.bringToFront?.();
+            }
+
+            async detectEdges() {
+                return new Promise(resolve => {
+                    const size = this.capturedImage.width;
+                    const sensitivity = parseInt(document.getElementById('sensitivity').value);
+                    const widthFilter = parseInt(document.getElementById('width-filter').value);
+
+                    this.processCtx.putImageData(this.capturedImage, 0, 0);
+                    const imageData = this.processCtx.getImageData(0, 0, size, size);
+                    const data = imageData.data;
+
+                    // Grayscale
+                    const gray = new Uint8Array(size * size);
+                    for (let i = 0; i < size * size; i++) {
+                        const idx = i * 4;
+                        gray[i] = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+                    }
+
+                    // Gaussian blur
+                    const blurred = this.gaussianBlur(gray, size, size);
+
+                    // Sobel edge detection
+                    const edges = this.sobelEdgeDetection(blurred, size, size, sensitivity);
+
+                    // Road filtering
+                    const roadEdges = this.filterRoadFeatures(edges, size, size, widthFilter);
+
+                    this.detectedEdges = roadEdges;
+                    resolve();
+                });
+            }
+
+            gaussianBlur(input, width, height) {
+                const output = new Uint8Array(width * height);
+                const kernel = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+
+                for (let y = 1; y < height - 1; y++) {
+                    for (let x = 1; x < width - 1; x++) {
+                        let sum = 0, ki = 0;
+                        for (let ky = -1; ky <= 1; ky++) {
+                            for (let kx = -1; kx <= 1; kx++) {
+                                sum += input[(y + ky) * width + (x + kx)] * kernel[ki++];
+                            }
+                        }
+                        output[y * width + x] = Math.round(sum / 16);
+                    }
+                }
+                return output;
+            }
+
+            sobelEdgeDetection(input, width, height, sensitivity) {
+                const output = new Uint8Array(width * height);
+                const threshold = 255 - (sensitivity * 2.5);
+                const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+                const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+
+                for (let y = 1; y < height - 1; y++) {
+                    for (let x = 1; x < width - 1; x++) {
+                        let gx = 0, gy = 0, ki = 0;
+                        for (let ky = -1; ky <= 1; ky++) {
+                            for (let kx = -1; kx <= 1; kx++) {
+                                const pixel = input[(y + ky) * width + (x + kx)];
+                                gx += pixel * sobelX[ki];
+                                gy += pixel * sobelY[ki++];
+                            }
+                        }
+                        output[y * width + x] = Math.sqrt(gx * gx + gy * gy) > threshold ? 255 : 0;
+                    }
+                }
+                return output;
+            }
+
+            filterRoadFeatures(edges, width, height, minWidth) {
+                const dilated = this.dilate(edges, width, height, minWidth);
+                const closed = this.erode(dilated, width, height, Math.max(1, minWidth - 1));
+                return this.skeletonize(closed, width, height);
+            }
+
+            dilate(input, width, height, radius) {
+                const output = new Uint8Array(width * height);
+                for (let y = radius; y < height - radius; y++) {
+                    for (let x = radius; x < width - radius; x++) {
+                        let max = 0;
+                        for (let dy = -radius; dy <= radius; dy++) {
+                            for (let dx = -radius; dx <= radius; dx++) {
+                                max = Math.max(max, input[(y + dy) * width + (x + dx)]);
+                            }
+                        }
+                        output[y * width + x] = max;
+                    }
+                }
+                return output;
+            }
+
+            erode(input, width, height, radius) {
+                const output = new Uint8Array(width * height);
+                for (let y = radius; y < height - radius; y++) {
+                    for (let x = radius; x < width - radius; x++) {
+                        let min = 255;
+                        for (let dy = -radius; dy <= radius; dy++) {
+                            for (let dx = -radius; dx <= radius; dx++) {
+                                min = Math.min(min, input[(y + dy) * width + (x + dx)]);
+                            }
+                        }
+                        output[y * width + x] = min;
+                    }
+                }
+                return output;
+            }
+
+            skeletonize(input, width, height) {
+                let current = new Uint8Array(input);
+                let changed = true, iterations = 0;
+
+                while (changed && iterations < 50) {
+                    changed = false;
+                    const toRemove = [];
+
+                    for (let y = 1; y < height - 1; y++) {
+                        for (let x = 1; x < width - 1; x++) {
+                            if (current[y * width + x] === 0) continue;
+
+                            const n = this.getNeighbors(current, x, y, width);
+                            const t = this.countTransitions(n);
+                            const b = n.filter(v => v > 0).length;
+
+                            if (b >= 2 && b <= 6 && t === 1 &&
+                                (n[0] === 0 || n[2] === 0 || n[4] === 0) &&
+                                (n[2] === 0 || n[4] === 0 || n[6] === 0)) {
+                                toRemove.push(y * width + x);
+                                changed = true;
+                            }
+                        }
+                    }
+
+                    toRemove.forEach(idx => current[idx] = 0);
+                    iterations++;
+                }
+                return current;
+            }
+
+            getNeighbors(data, x, y, width) {
+                return [
+                    data[(y - 1) * width + x], data[(y - 1) * width + x + 1],
+                    data[y * width + x + 1], data[(y + 1) * width + x + 1],
+                    data[(y + 1) * width + x], data[(y + 1) * width + x - 1],
+                    data[y * width + x - 1], data[(y - 1) * width + x - 1]
+                ];
+            }
+
+            countTransitions(neighbors) {
+                let count = 0;
+                for (let i = 0; i < 8; i++) {
+                    if (neighbors[i] === 0 && neighbors[(i + 1) % 8] > 0) count++;
+                }
+                return count;
+            }
+
+            showEdgePreview() {
+                const size = Math.sqrt(this.detectedEdges.length);
+                if (size === 0) return;
+
+                this.previewCanvas.width = 340;
+                this.previewCanvas.height = 200;
+
+                const previewData = this.previewCtx.createImageData(340, 200);
+                const scaleX = size / 340, scaleY = size / 200;
+
+                for (let y = 0; y < 200; y++) {
+                    for (let x = 0; x < 340; x++) {
+                        const srcIdx = Math.floor(y * scaleY) * size + Math.floor(x * scaleX);
+                        const dstIdx = (y * 340 + x) * 4;
+
+                        if (this.detectedEdges[srcIdx] > 0) {
+                            previewData.data[dstIdx] = 0;
+                            previewData.data[dstIdx + 1] = 255;
+                            previewData.data[dstIdx + 2] = 136;
+                        } else {
+                            previewData.data[dstIdx] = 26;
+                            previewData.data[dstIdx + 1] = 26;
+                            previewData.data[dstIdx + 2] = 36;
+                        }
+                        previewData.data[dstIdx + 3] = 255;
+                    }
+                }
+
+                this.previewCtx.putImageData(previewData, 0, 0);
+            }
+
+            previewDetection() {
+                if (!this.capturedImage) { alert('Run detection first'); return; }
+
+                const size = this.capturedImage.width;
+                this.previewCanvas.width = 340;
+                this.previewCanvas.height = 200;
+
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = size;
+                tempCanvas.height = size;
+                tempCanvas.getContext('2d').putImageData(this.capturedImage, 0, 0);
+
+                this.previewCtx.drawImage(tempCanvas, 0, 0, size, size, 0, 0, 340, 200);
+            }
+
+            async vectorizeAndDisplay() {
+                if (!this.detectedEdges || this.detectedEdges.length === 0) { alert('Run detection first'); return; }
+
+                this.showProcessing(true, 'Vectorizing', 'Tracing road lines...');
+                this.setMode('vectorizing', 'Converting pixels to vector lines...');
+
+                await new Promise(r => setTimeout(r, 100));
+
+                try {
+                    const size = Math.sqrt(this.detectedEdges.length);
+                    const lines = this.traceLines(this.detectedEdges, size, size);
+
+                    const simplifyTolerance = parseInt(document.getElementById('simplify').value);
+                    const simplifiedLines = lines.map(l => this.simplifyLine(l, simplifyTolerance));
+
+                    const minLength = parseInt(document.getElementById('min-length').value);
+                    const filteredLines = simplifiedLines.filter(l => this.calculateLineLength(l) >= minLength);
+
+                    const geoLines = filteredLines.map(l => this.pixelToGeo(l, size));
+
+                    this.vectorizedRoads = geoLines;
+                    this.displayVectorizedRoads(geoLines);
+                    this.updateStats(geoLines);
+
+                    this.showProcessing(false);
+                    this.setMode('ready', `Vectorized ${geoLines.length} unverified line candidates — add them to export`);
+                } catch (error) {
+                    console.error('Vectorization failed:', error);
+                    this.showProcessing(false);
+                    this.setMode('error', 'Vectorization failed');
+                }
+            }
+
+            traceLines(edges, width, height) {
+                // Follow neighboring skeleton pixels in path order. Sorting pixels by X/Y
+                // makes false long jumps between disconnected parts of a component.
+                const visitedEdges = new Set();
+                const lines = [];
+                const neighbors = (index) => {
+                    const x = index % width, y = Math.floor(index / width);
+                    const result = [];
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = x + dx, ny = y + dy;
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height && edges[ny * width + nx] > 0) {
+                                result.push(ny * width + nx);
+                            }
+                        }
+                    }
+                    return result;
+                };
+                const key = (a, b) => a < b ? `${a}:${b}` : `${b}:${a}`;
+                const walk = (start, next) => {
+                    const path = [start, next];
+                    visitedEdges.add(key(start, next));
+                    let previous = start, current = next;
+                    while (true) {
+                        const adjacent = neighbors(current);
+                        if (adjacent.length !== 2) break;
+                        const candidate = adjacent[0] === previous ? adjacent[1] : adjacent[0];
+                        const edgeKey = key(current, candidate);
+                        if (visitedEdges.has(edgeKey)) break;
+                        visitedEdges.add(edgeKey);
+                        path.push(candidate);
+                        previous = current;
+                        current = candidate;
+                    }
+                    if (path.length >= 3) lines.push(path.map(index => [index % width, Math.floor(index / width)]));
+                };
+
+                // Start at endpoints and junctions, then collect any closed loops.
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = y * width + x;
+                        if (edges[idx] === 0) continue;
+                        const adjacent = neighbors(idx);
+                        if (adjacent.length === 2) continue;
+                        for (const next of adjacent) if (!visitedEdges.has(key(idx, next))) walk(idx, next);
+                    }
+                }
+                for (let idx = 0; idx < edges.length; idx++) {
+                    if (edges[idx] === 0) continue;
+                    for (const next of neighbors(idx)) if (!visitedEdges.has(key(idx, next))) walk(idx, next);
+                }
+                return lines;
+            }
+
+            simplifyLine(line, tolerance) {
+                if (line.length <= 2) return line;
+
+                const sqTolerance = tolerance * tolerance;
+
+                const getSqSegDist = (p, p1, p2) => {
+                    let x = p1[0], y = p1[1], dx = p2[0] - x, dy = p2[1] - y;
+                    if (dx !== 0 || dy !== 0) {
+                        const t = ((p[0] - x) * dx + (p[1] - y) * dy) / (dx * dx + dy * dy);
+                        if (t > 1) { x = p2[0]; y = p2[1]; }
+                        else if (t > 0) { x += dx * t; y += dy * t; }
+                    }
+                    dx = p[0] - x; dy = p[1] - y;
+                    return dx * dx + dy * dy;
+                };
+
+                const simplifyDPStep = (points, first, last, sqTol, simplified) => {
+                    let maxSqDist = sqTol, index = 0;
+                    for (let i = first + 1; i < last; i++) {
+                        const sqDist = getSqSegDist(points[i], points[first], points[last]);
+                        if (sqDist > maxSqDist) { index = i; maxSqDist = sqDist; }
+                    }
+                    if (maxSqDist > sqTol) {
+                        if (index - first > 1) simplifyDPStep(points, first, index, sqTol, simplified);
+                        simplified.push(points[index]);
+                        if (last - index > 1) simplifyDPStep(points, index, last, sqTol, simplified);
+                    }
+                };
+
+                const simplified = [line[0]];
+                simplifyDPStep(line, 0, line.length - 1, sqTolerance, simplified);
+                simplified.push(line[line.length - 1]);
+                return simplified;
+            }
+
+            calculateLineLength(line) {
+                let length = 0;
+                for (let i = 1; i < line.length; i++) {
+                    const dx = line[i][0] - line[i-1][0], dy = line[i][1] - line[i-1][1];
+                    length += Math.sqrt(dx * dx + dy * dy);
+                }
+                return length;
+            }
+
+            pixelToGeo(line, imageSize) {
+                if (!this.captureBounds) return line;
+                const { minLat, maxLat, minLon, maxLon } = this.captureBounds;
+                return line.map(([px, py]) => [
+                    minLon + (px / imageSize) * (maxLon - minLon),
+                    maxLat - (py / imageSize) * (maxLat - minLat)
+                ]);
+            }
+
+            displayVectorizedRoads(geoLines) {
+                this.roadLayer.eachLayer(layer => {
+                    if (layer.options && layer.options.isDetectionResult) this.roadLayer.removeLayer(layer);
+                });
+
+                const color = document.getElementById('road-color').value;
+                const weight = parseInt(document.getElementById('line-weight').value);
+
+                geoLines.forEach((line, idx) => {
+                    const latLngs = line.map(([lon, lat]) => [lat, lon]);
+                    const polyline = L.polyline(latLngs, { color, weight, opacity: 0.8, isDetectionResult: true });
+                    polyline.on('click', () => this.showFeatureProperties(line, idx));
+                    this.roadLayer.addLayer(polyline);
+                });
+            }
+
+            addToMainLayer() {
+                if (this.vectorizedRoads.length === 0) { alert('No candidates to add. Try a lower minimum line length or a different area.'); return; }
+
+                const timestamp = new Date().toISOString();
+                const newRoads = this.vectorizedRoads.map((line, idx) => ({
+                    type: 'Feature',
+                    geometry: { type: 'LineString', coordinates: line },
+                    properties: {
+                        id: `road_${Date.now()}_${idx}`,
+                        source: 'usgs_naip_edge_extraction',
+                        review_status: 'unverified',
+                        detected_at: timestamp,
+                        length_m: this.calculateGeoLength(line)
+                    }
+                }));
+
+                this.allRoads.push(...newRoads);
+                this.redrawAllRoads();
+                this.updateLayerCount();
+                this.vectorizedRoads = [];
+                this.setMode('ready', `Added ${newRoads.length} candidates to layer (Total: ${this.allRoads.length})`);
+            }
+
+            calculateGeoLength(line) {
+                let length = 0;
+                for (let i = 1; i < line.length; i++) {
+                    length += this.haversineDistance(line[i-1][1], line[i-1][0], line[i][1], line[i][0]);
+                }
+                return Math.round(length);
+            }
+
+            haversineDistance(lat1, lon1, lat2, lon2) {
+                const R = 6371000;
+                const dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(dLat/2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) ** 2;
+                return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            }
+
+            redrawAllRoads() {
+                this.roadLayer.clearLayers();
+                const color = document.getElementById('road-color').value;
+                const weight = parseInt(document.getElementById('line-weight').value);
+
+                this.allRoads.forEach((feature, idx) => {
+                    const latLngs = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+                    const polyline = L.polyline(latLngs, { color, weight, opacity: 0.9 });
+                    polyline.on('click', () => this.showFeatureProperties(feature.geometry.coordinates, idx, feature.properties));
+                    this.roadLayer.addLayer(polyline);
+                });
+            }
+
+            updateLayerStyle() {
+                this.redrawAllRoads();
+                if (this.vectorizedRoads.length > 0) this.displayVectorizedRoads(this.vectorizedRoads);
+            }
+
+            updateStats(geoLines) {
+                let totalLength = 0, totalVertices = 0;
+                geoLines.forEach(line => { totalLength += this.calculateGeoLength(line); totalVertices += line.length; });
+
+                document.getElementById('stat-roads').textContent = geoLines.length;
+                document.getElementById('stat-length').innerHTML = totalLength.toLocaleString() + '<span class="stat-unit">m</span>';
+                document.getElementById('stat-vertices').textContent = totalVertices.toLocaleString();
+            }
+
+            updateLayerCount() {
+                const totalLength = this.allRoads.reduce((sum, f) => sum + (f.properties.length_m || 0), 0);
+                document.getElementById('layer-count').textContent = `${this.allRoads.length} features • ${(totalLength/1000).toFixed(2)} km`;
+            }
+
+            toggleLayerVisibility(visible) {
+                if (visible) this.map.addLayer(this.roadLayer);
+                else this.map.removeLayer(this.roadLayer);
+            }
+
+            zoomToLayer() {
+                if (this.allRoads.length === 0) return;
+                const bounds = L.latLngBounds();
+                this.allRoads.forEach(f => f.geometry.coordinates.forEach(([lon, lat]) => bounds.extend([lat, lon])));
+                this.map.fitBounds(bounds, { padding: [50, 50] });
+            }
+
+            showFeatureProperties(line, idx, properties = {}) {
+                const length = properties.length_m || this.calculateGeoLength(line);
+                document.getElementById('feature-props').innerHTML = `
+                    <h4>Line Candidate #${idx + 1}</h4>
+                    <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${length.toLocaleString()} m</span></div>
+                    <div class="prop-row"><span class="prop-key">Vertices</span><span class="prop-value">${line.length}</span></div>
+                    <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">${properties.source || 'USGS NAIP edge extraction'}</span></div>
+                    <div class="prop-row"><span class="prop-key">Start</span><span class="prop-value">${line[0][1].toFixed(6)}, ${line[0][0].toFixed(6)}</span></div>
+                    <div class="prop-row"><span class="prop-key">End</span><span class="prop-value">${line[line.length-1][1].toFixed(6)}, ${line[line.length-1][0].toFixed(6)}</span></div>
+                `;
+            }
+
+            clearAllRoads() {
+                if (this.allRoads.length > 0 && !confirm('Clear all detected roads?')) return;
+                this.allRoads = [];
+                this.vectorizedRoads = [];
+                this.roadLayer.clearLayers();
+                this.updateLayerCount();
+                this.setMode('ready', 'All roads cleared');
+                document.getElementById('stat-roads').textContent = '0';
+                document.getElementById('stat-length').innerHTML = '0<span class="stat-unit">m</span>';
+                document.getElementById('stat-vertices').textContent = '0';
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
+            }
+
+            exportLayer(format) {
+                if (this.allRoads.length === 0) { alert('No line candidates to export.'); return; }
+
+                const geojson = {
+                    type: 'FeatureCollection',
+                    features: this.allRoads,
+                    properties: { name: 'Unverified Line Candidates', created: new Date().toISOString(), source: 'AetherMap / USGS NAIP' }
+                };
+
+                let content, filename, mimeType;
+
+                switch (format) {
+                    case 'geojson':
+                        content = JSON.stringify(geojson, null, 2);
+                        filename = 'unverified_line_candidates.geojson';
+                        mimeType = 'application/json';
+                        break;
+                    case 'kml':
+                        content = this.toKML(geojson);
+                        filename = 'unverified_line_candidates.kml';
+                        mimeType = 'application/xml';
+                        break;
+                    case 'wkt':
+                        content = this.toWKT(geojson);
+                        filename = 'unverified_line_candidates.wkt';
+                        mimeType = 'text/plain';
+                        break;
+                    case 'osm':
+                        content = this.toOSM(geojson);
+                        filename = 'unverified_line_candidates.osm';
+                        mimeType = 'application/xml';
+                        break;
+                }
+
+                const blob = new Blob([content], { type: mimeType });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+            }
+
+            toKML(geojson) {
+                const placemarks = geojson.features.map((f, i) => {
+                    const coords = f.geometry.coordinates.map(c => `${c[0]},${c[1]},0`).join(' ');
+                    return `<Placemark><name>Unverified line ${i + 1}</name><LineString><coordinates>${coords}</coordinates></LineString></Placemark>`;
+                }).join('\n');
+                return `<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Unverified Line Candidates</name>${placemarks}</Document></kml>`;
+            }
+
+            toWKT(geojson) {
+                return geojson.features.map((f, i) => {
+                    const coords = f.geometry.coordinates.map(c => `${c[0]} ${c[1]}`).join(', ');
+                    return `-- Unverified line ${i + 1}\nLINESTRING(${coords})`;
+                }).join('\n\n');
+            }
+
+            toOSM(geojson) {
+                let nodeId = -1, wayId = -1;
+                const nodes = [], ways = [];
+
+                geojson.features.forEach(f => {
+                    const wayNodes = [];
+                    f.geometry.coordinates.forEach(([lon, lat]) => {
+                        nodes.push(`<node id="${nodeId}" lat="${lat}" lon="${lon}"/>`);
+                        wayNodes.push(`<nd ref="${nodeId}"/>`);
+                        nodeId--;
+                    });
+                    ways.push(`<way id="${wayId}">${wayNodes.join('')}<tag k="source" v="USGS NAIP edge extraction"/><tag k="review_status" v="unverified"/></way>`);
+                    wayId--;
+                });
+
+                return `<?xml version="1.0"?><osm version="0.6">${nodes.join('')}${ways.join('')}</osm>`;
+            }
+
+            lon2tile(lon, zoom) { return (lon + 180) / 360 * Math.pow(2, zoom); }
+            lat2tile(lat, zoom) { return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom); }
+        }
+
+        const detector = new RoadDetectorEngine();
+    </script>
+</body>
+</html>

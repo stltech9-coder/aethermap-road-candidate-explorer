@@ -1,0 +1,11 @@
+.env
+.env.*
+*.pth
+*.pt
+*.onnx
+*.tif
+*.tiff
+*.jp2
+node_modules/
+__pycache__/
+.DS_Store
