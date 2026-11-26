@@ -426,7 +426,7 @@
 
             <div class="section">
                 <div class="section-title">Imagery &amp; map</div>
-                <p style="font-size:12px;line-height:1.5;color:#aeb3c5;">Analysis image: USGS NAIP (contiguous U.S.). Background map: OpenStreetMap. Imagery is requested only for the selected area.</p>
+                <p style="font-size:12px;line-height:1.5;color:#aeb3c5;">Map and analysis: USGS NAIP aerial imagery (contiguous U.S.). OpenStreetMap remains visible while imagery loads or outside coverage.</p>
             </div>
 
             <div class="section">
@@ -448,6 +448,7 @@
             <div id="map"></div>
             <div class="map-overlay">
                 <div class="coords-display" id="coords-display">Lat: ---, Lon: --- | Zoom: --</div>
+                <div id="map-source-status" style="font-size:11px;color:#c5c9d8;margin-top:4px;">Loading USGS imagery…</div>
             </div>
 
             <div class="processing-overlay" id="processing-overlay">
@@ -552,7 +553,10 @@
                     maxZoom: 19,
                     attribution: '&copy; OpenStreetMap contributors'
                 }).addTo(this.map);
-                this.imageryOverlay = null;
+                this.visibleImagery = null;
+                this.pendingImagery = null;
+                this.imageryRequest = 0;
+                this.map.attributionControl.addAttribution('Imagery: USGS / USDA / The National Map');
                 this.roadLayer = L.layerGroup().addTo(this.map);
                 this.areaLayer = L.layerGroup().addTo(this.map);
 
@@ -566,8 +570,61 @@
                     document.getElementById('center-lon').value = e.latlng.lng.toFixed(6);
                     this.updateDetectionArea();
                 });
+                this.map.on('moveend', () => this.loadVisibleImagery());
+                this.map.on('zoomend', () => this.updateDetectionArea());
 
                 this.updateDetectionArea();
+                this.loadVisibleImagery();
+            }
+
+            imageryUrl(bounds, width, height) {
+                const southwest = L.CRS.EPSG3857.project(bounds.getSouthWest());
+                const northeast = L.CRS.EPSG3857.project(bounds.getNorthEast());
+                const params = new URLSearchParams({
+                    bbox: [southwest.x, southwest.y, northeast.x, northeast.y].join(','),
+                    bboxSR: '3857', imageSR: '3857',
+                    size: `${width},${height}`, format: 'jpg', f: 'image'
+                });
+                return `https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?${params}`;
+            }
+
+            loadVisibleImagery() {
+                const center = this.map.getCenter();
+                const status = document.getElementById('map-source-status');
+                const request = ++this.imageryRequest;
+                if (center.lat < 24 || center.lat > 50 || center.lng < -125 || center.lng > -66) {
+                    if (this.pendingImagery) this.map.removeLayer(this.pendingImagery);
+                    this.pendingImagery = null;
+                    if (this.visibleImagery) this.map.removeLayer(this.visibleImagery);
+                    this.visibleImagery = null;
+                    status.textContent = 'Outside USGS NAIP coverage';
+                    return;
+                }
+                const bounds = this.map.getBounds();
+                const size = this.map.getSize();
+                const width = Math.min(1600, Math.max(256, Math.round(size.x)));
+                const height = Math.min(1600, Math.max(256, Math.round(size.y)));
+                if (this.pendingImagery) this.map.removeLayer(this.pendingImagery);
+                status.textContent = 'Loading USGS NAIP map…';
+                const overlay = L.imageOverlay(this.imageryUrl(bounds, width, height), bounds, {
+                    pane: 'tilePane', opacity: 0
+                });
+                this.pendingImagery = overlay;
+                overlay.on('load', () => {
+                    if (request !== this.imageryRequest) { this.map.removeLayer(overlay); return; }
+                    if (this.visibleImagery) this.map.removeLayer(this.visibleImagery);
+                    this.visibleImagery = overlay;
+                    this.pendingImagery = null;
+                    overlay.setOpacity(1);
+                    status.textContent = 'Map and analysis: USGS NAIP';
+                });
+                overlay.on('error', () => {
+                    if (request !== this.imageryRequest) return;
+                    this.map.removeLayer(overlay);
+                    this.pendingImagery = null;
+                    status.textContent = 'Imagery unavailable; OpenStreetMap fallback';
+                });
+                overlay.addTo(this.map);
             }
 
             initSliders() {
@@ -678,12 +735,8 @@
                 }
                 this.updateDetectionArea();
                 const { minLon, minLat, maxLon, maxLat } = this.captureBounds;
-                const params = new URLSearchParams({
-                    bbox: [minLon, minLat, maxLon, maxLat].join(','),
-                    bboxSR: '4326', imageSR: '4326',
-                    size: `${size},${size}`, format: 'jpg', f: 'image'
-                });
-                const url = `https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?${params}`;
+                const bounds = L.latLngBounds([[minLat, minLon], [maxLat, maxLon]]);
+                const url = this.imageryUrl(bounds, size, size);
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
                 await new Promise((resolve, reject) => {
@@ -698,13 +751,6 @@
                 this.processCanvas.height = size;
                 this.captureCtx.drawImage(img, 0, 0, size, size);
                 this.capturedImage = this.captureCtx.getImageData(0, 0, size, size);
-                if (this.imageryOverlay) this.map.removeLayer(this.imageryOverlay);
-                this.imageryOverlay = L.imageOverlay(url, [[minLat, minLon], [maxLat, maxLon]], { opacity: 0.9 }).addTo(this.map);
-                if (!this.imageryCreditAdded) {
-                    this.map.attributionControl.addAttribution('Analysis image: USGS NAIP');
-                    this.imageryCreditAdded = true;
-                }
-                this.roadLayer.bringToFront?.();
             }
 
             async detectEdges() {
@@ -1045,10 +1091,16 @@
             pixelToGeo(line, imageSize) {
                 if (!this.captureBounds) return line;
                 const { minLat, maxLat, minLon, maxLon } = this.captureBounds;
-                return line.map(([px, py]) => [
-                    minLon + (px / imageSize) * (maxLon - minLon),
-                    maxLat - (py / imageSize) * (maxLat - minLat)
-                ]);
+                const southwest = L.CRS.EPSG3857.project(L.latLng(minLat, minLon));
+                const northeast = L.CRS.EPSG3857.project(L.latLng(maxLat, maxLon));
+                return line.map(([px, py]) => {
+                    const point = L.point(
+                        southwest.x + (px / imageSize) * (northeast.x - southwest.x),
+                        northeast.y - (py / imageSize) * (northeast.y - southwest.y)
+                    );
+                    const latlng = L.CRS.EPSG3857.unproject(point);
+                    return [latlng.lng, latlng.lat];
+                });
             }
 
             displayVectorizedRoads(geoLines) {

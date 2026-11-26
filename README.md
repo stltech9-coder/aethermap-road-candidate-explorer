@@ -7,16 +7,16 @@ A browser-based image-processing prototype that turns visible linear features in
 ## Try it
 
 1. Open `index.html` through a static web server or the GitHub Pages demo.
-2. Click a location in the contiguous United States. The default example is downtown Phoenix, Arizona.
-3. Select **Find Line Candidates** to request a USGS NAIP image and preview its extracted edges.
+2. The map displays USGS NAIP aerial imagery in the contiguous United States. Pan or zoom to an area, then click the location to analyze. The default example is downtown Phoenix, Arizona.
+3. Select **Find Line Candidates** to request an analysis image from the same USGS service and preview its extracted edges.
 4. Select **Vectorize Candidates**, review the green overlay, then **Add to Layer**.
 5. Export GeoJSON, KML, WKT, or OSM XML for further review. Exported features are marked `review_status: unverified`; OSM XML omits a `highway` classification.
 
 ## What the prototype demonstrates
 
-- A georeferenced image request from the [USGS NAIP ImageServer](https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer).
+- A live aerial map and georeferenced analysis image from the [USGS NAIP ImageServer](https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer).
 - Browser-side grayscale conversion, Gaussian blur, Sobel edge extraction, morphology, skeleton tracing, simplification, and vector export.
-- A map overlay and basic feature/length statistics. OpenStreetMap supplies the background map with attribution.
+- A map overlay and basic feature/length statistics. OpenStreetMap is the fallback map while USGS imagery loads or outside coverage.
 
 This is **classical image processing**, not a trained AI model. It does not provide PyTorch inference, visual search, SKU recognition, validated road classification, or measured precision/recall. Building and shadow edges can become candidates; every line needs human review before use.
 
