@@ -355,7 +355,7 @@
                 <div class="mode-dot" id="mode-dot"></div>
                 <span class="mode-text" id="mode-text">Ready — click a U.S. location to set the analysis area</span>
             </div>
-            <p style="font-size:12px;line-height:1.5;color:#aeb3c5;margin:-8px 0 18px;">Exploratory edge extraction from USGS NAIP imagery. Results are unverified candidates, not a trained AI model or authoritative road data.</p>
+            <p style="font-size:12px;line-height:1.5;color:#aeb3c5;margin:-8px 0 18px;">Exploratory line extraction from USGS NAIP imagery. Results are unverified candidates, not authoritative road data.</p>
 
             <div class="section">
                 <div class="section-title">Detection Area</div>
@@ -418,6 +418,8 @@
                 <div class="section-title">Actions</div>
                 <button class="btn btn-primary" id="btn-detect">🔍 Find Line Candidates</button>
                 <button class="btn btn-accent" id="btn-vectorize">📐 Vectorize Candidates</button>
+                <button class="btn btn-secondary" id="btn-sam" disabled>🧠 SAM-assisted Trace (Local)</button>
+                <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="btn-preview">👁️ Preview</button>
                     <button class="btn btn-secondary" id="btn-add-to-layer">➕ Add to Layer</button>
@@ -533,6 +535,7 @@
                 this.vectorizedRoads = [];
                 this.allRoads = [];
                 this.captureBounds = null;
+                this.currentSource = 'usgs_naip_edge_extraction';
 
                 this.captureCanvas = document.getElementById('capture-canvas');
                 this.processCanvas = document.getElementById('process-canvas');
@@ -544,6 +547,7 @@
                 this.initMap();
                 this.initEventListeners();
                 this.initSliders();
+                this.checkSamBackend();
             }
 
             initMap() {
@@ -641,6 +645,7 @@
             initEventListeners() {
                 document.getElementById('btn-detect').addEventListener('click', () => this.runDetection());
                 document.getElementById('btn-vectorize').addEventListener('click', () => this.vectorizeAndDisplay());
+                document.getElementById('btn-sam').addEventListener('click', () => this.runSamTrace());
                 document.getElementById('btn-preview').addEventListener('click', () => this.previewDetection());
                 document.getElementById('btn-add-to-layer').addEventListener('click', () => this.addToMainLayer());
                 document.getElementById('btn-clear-layer').addEventListener('click', () => this.clearAllRoads());
@@ -708,6 +713,7 @@
             async runDetection() {
                 this.detectedEdges = null;
                 this.vectorizedRoads = [];
+                this.currentSource = 'usgs_naip_edge_extraction';
                 this.setMode('detecting', 'Requesting USGS imagery...');
                 this.showProcessing(true, 'Finding candidates', 'Requesting USGS NAIP imagery...');
 
@@ -751,6 +757,82 @@
                 this.processCanvas.height = size;
                 this.captureCtx.drawImage(img, 0, 0, size, size);
                 this.capturedImage = this.captureCtx.getImageData(0, 0, size, size);
+            }
+
+            async checkSamBackend() {
+                const status = document.getElementById('sam-status');
+                const button = document.getElementById('btn-sam');
+                try {
+                    const response = await fetch('/api/sam-status', { cache: 'no-store' });
+                    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
+                    const info = await response.json();
+                    button.disabled = !info.available;
+                    status.textContent = info.available
+                        ? `${info.model} available locally (${info.device}). First scan may take several minutes. Results need review.`
+                        : `SAM unavailable: ${info.reason}`;
+                } catch (_) {
+                    button.disabled = true;
+                    status.textContent = 'SAM requires the local launcher; browser edge tracing remains available here.';
+                }
+            }
+
+            async runSamTrace() {
+                const button = document.getElementById('btn-sam');
+                button.disabled = true;
+                this.vectorizedRoads = [];
+                this.detectedEdges = null;
+                this.currentSource = 'usgs_naip_sam_mask_heuristic';
+                this.displayVectorizedRoads([]);
+                this.updateStats([]);
+                this.setMode('detecting', 'Fetching USGS NAIP image for local SAM…');
+                try {
+                    await this.captureMapArea();
+                    const image = await new Promise((resolve, reject) =>
+                        this.captureCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode image')), 'image/png'));
+                    const b = this.captureBounds;
+                    const sw = L.CRS.EPSG3857.project(L.latLng(b.minLat, b.minLon));
+                    const ne = L.CRS.EPSG3857.project(L.latLng(b.maxLat, b.maxLon));
+                    const form = new FormData();
+                    form.append('image', image, 'naip.png');
+                    form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
+                    form.append('min_pixels', document.getElementById('min-length').value);
+                    const response = await fetch('/api/sam-trace', { method: 'POST', body: form });
+                    if (!response.ok || !response.body) {
+                        const detail = await response.json().catch(() => ({}));
+                        throw new Error(detail.error || `Backend returned HTTP ${response.status}`);
+                    }
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let pending = '';
+                    const handle = line => {
+                        if (!line.trim()) return;
+                        const message = JSON.parse(line);
+                        if (message.type === 'error') throw new Error(message.message);
+                        if (message.type === 'status') this.setMode('detecting', message.message);
+                        if (message.type === 'line') {
+                            this.vectorizedRoads.push(message.coordinates);
+                            this.displayVectorizedRoads(this.vectorizedRoads);
+                            this.updateStats(this.vectorizedRoads);
+                            this.setMode('detecting', `SAM-assisted trace: ${this.vectorizedRoads.length} unverified lines displayed…`);
+                        }
+                        if (message.type === 'done') this.setMode('ready', `SAM found ${message.masks} generic masks; traced ${message.lines} unverified line candidates`);
+                    };
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        pending += decoder.decode(value, { stream: true });
+                        let newline;
+                        while ((newline = pending.indexOf('\n')) >= 0) {
+                            handle(pending.slice(0, newline));
+                            pending = pending.slice(newline + 1);
+                        }
+                    }
+                    if (pending.trim()) handle(pending);
+                } catch (error) {
+                    this.setMode('error', error.message);
+                } finally {
+                    button.disabled = false;
+                }
             }
 
             async detectEdges() {
@@ -1114,7 +1196,7 @@
                 geoLines.forEach((line, idx) => {
                     const latLngs = line.map(([lon, lat]) => [lat, lon]);
                     const polyline = L.polyline(latLngs, { color, weight, opacity: 0.8, isDetectionResult: true });
-                    polyline.on('click', () => this.showFeatureProperties(line, idx));
+                    polyline.on('click', () => this.showFeatureProperties(line, idx, { source: this.currentSource }));
                     this.roadLayer.addLayer(polyline);
                 });
             }
@@ -1128,7 +1210,7 @@
                     geometry: { type: 'LineString', coordinates: line },
                     properties: {
                         id: `road_${Date.now()}_${idx}`,
-                        source: 'usgs_naip_edge_extraction',
+                        source: this.currentSource,
                         review_status: 'unverified',
                         detected_at: timestamp,
                         length_m: this.calculateGeoLength(line)
