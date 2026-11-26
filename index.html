@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AetherMap Road Candidate Explorer</title>
+    <title>AetherMap Feature Tracer</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -349,7 +349,7 @@
                 <div class="logo-icon">🛣️</div>
                 <div>
                     <div class="logo-text">AetherMap</div>
-                    <div class="logo-subtitle">Road Candidate Explorer</div>
+                    <div class="logo-subtitle">Feature Tracer</div>
                 </div>
             </div>
 
@@ -357,7 +357,7 @@
                 <div class="mode-dot" id="mode-dot"></div>
                 <span class="mode-text" id="mode-text">Ready — click a U.S. location to set the analysis area</span>
             </div>
-            <p style="font-size:12px;line-height:1.5;color:#aeb3c5;margin:-8px 0 18px;">Exploratory line extraction from USGS NAIP imagery. Results are unverified candidates, not authoritative road data.</p>
+            <p style="font-size:12px;line-height:1.5;color:#aeb3c5;margin:-8px 0 18px;">Trace a selected feature from the aerial image. SAM suggestions require visual review.</p>
 
             <div class="section">
                 <div class="section-title">Detection Area</div>
@@ -374,8 +374,8 @@
                 <div class="input-group">
                     <label>Capture Size (pixels)</label>
                     <select id="capture-size">
-                        <option value="512" selected>512 x 512</option>
-                        <option value="1024">1024 x 1024</option>
+                        <option value="512">512 x 512</option>
+                        <option value="1024" selected>1024 x 1024</option>
                     </select>
                 </div>
             </div>
@@ -417,13 +417,18 @@
             </div>
 
             <div class="section">
-                <div class="section-title">Actions</div>
-                <button class="btn btn-primary" id="btn-detect">🔍 Find Line Candidates</button>
-                <button class="btn btn-accent" id="btn-vectorize">📐 Vectorize Candidates</button>
-                <button class="btn btn-secondary" id="btn-sam" disabled>🧠 SAM Mask Proposals (Local)</button>
+                <div class="section-title">Trace imagery</div>
+                <div class="input-group">
+                    <label for="feature-type">Feature to trace</label>
+                    <select id="feature-type"><option value="road">Road centerline</option><option value="building">Building footprint</option><option value="tree" disabled>Tree canopy (future)</option></select>
+                </div>
+                <button class="btn btn-primary" id="btn-road-model" disabled>🛣️ Find Roads in Imagery (Local)</button>
+                <p id="road-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking local road model…</p>
+                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click Feature for SAM Trace (Local)</button>
+                <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Show Mapped Roads Over Imagery (Local)</button>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
-                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
+                <p id="trace-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="btn-undo-point" disabled>↶ Undo Point</button>
                     <button class="btn btn-primary" id="btn-finish-trace" disabled>✓ Save Trace</button>
@@ -431,10 +436,13 @@
                 <button class="btn btn-secondary" id="btn-osm" disabled>Load OSM Road Reference</button>
                 <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby OSM roads</label>
                 <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">OSM reference requires the local launcher.</p>
-                <div class="btn-group">
-                    <button class="btn btn-secondary" id="btn-preview">👁️ Preview</button>
-                    <button class="btn btn-secondary" id="btn-add-to-layer">➕ Add to Layer</button>
-                </div>
+                <details style="margin-top:12px;color:#aeb3c5;font-size:11px;"><summary>Generic image-line diagnostics (not feature classified)</summary>
+                    <button class="btn btn-secondary" id="btn-detect">Find Line Candidates</button>
+                    <button class="btn btn-secondary" id="btn-vectorize">Vectorize Candidates</button>
+                    <button class="btn btn-secondary" id="btn-sam" disabled>SAM Mask Proposals (Local)</button>
+                    <button class="btn btn-secondary" id="btn-preview">Preview</button>
+                    <p>These lines have no road, building, or tree classification. Review each proposal before saving.</p>
+                </details>
             </div>
 
             <div class="section">
@@ -530,7 +538,7 @@
             </div>
 
             <div style="margin-top: 16px;">
-                <button class="btn btn-danger" id="btn-clear-layer">🗑️ Clear All Roads</button>
+                <button class="btn btn-danger" id="btn-clear-layer">🗑️ Clear All Features</button>
             </div>
         </div>
     </div>
@@ -554,6 +562,12 @@
                 this.osmRoads = [];
                 this.editIndex = null;
                 this.editBackup = null;
+                this.featureType = 'road';
+                this.traceFeatureType = 'road';
+                this.promptMode = false;
+                this.promptCandidate = null;
+                this.mappedRoadCandidates = [];
+                this.modelRoadCandidates = [];
 
                 this.captureCanvas = document.getElementById('capture-canvas');
                 this.processCanvas = document.getElementById('process-canvas');
@@ -566,6 +580,7 @@
                 this.initEventListeners();
                 this.initSliders();
                 this.checkSamBackend();
+                this.checkRoadBackend();
             }
 
             initMap() {
@@ -583,6 +598,9 @@
                 this.areaLayer = L.layerGroup().addTo(this.map);
                 this.osmLayer = L.layerGroup().addTo(this.map);
                 this.traceLayer = L.layerGroup().addTo(this.map);
+                this.promptLayer = L.layerGroup().addTo(this.map);
+                this.mappedRoadLayer = L.layerGroup().addTo(this.map);
+                this.modelRoadLayer = L.layerGroup().addTo(this.map);
                 this.map.attributionControl.addAttribution('OSM roads: © OpenStreetMap contributors (ODbL)');
 
                 this.map.on('mousemove', (e) => {
@@ -591,6 +609,10 @@
                 });
 
                 this.map.on('click', (e) => {
+                    if (this.promptMode) {
+                        this.promptTraceAt(e.latlng);
+                        return;
+                    }
                     if (this.traceMode) {
                         this.addTracePoint(e.latlng);
                         return;
@@ -671,12 +693,15 @@
                 document.getElementById('btn-detect').addEventListener('click', () => this.runDetection());
                 document.getElementById('btn-vectorize').addEventListener('click', () => this.vectorizeAndDisplay());
                 document.getElementById('btn-sam').addEventListener('click', () => this.runSamTrace());
+                document.getElementById('btn-sam-point').addEventListener('click', () => this.togglePromptMode());
+                document.getElementById('btn-mapped-roads').addEventListener('click', () => this.showMappedRoads());
+                document.getElementById('btn-road-model').addEventListener('click', () => this.findRoadsInImagery());
+                document.getElementById('feature-type').addEventListener('change', () => this.setFeatureType());
                 document.getElementById('btn-trace').addEventListener('click', () => this.toggleTrace());
                 document.getElementById('btn-undo-point').addEventListener('click', () => this.undoTracePoint());
                 document.getElementById('btn-finish-trace').addEventListener('click', () => this.finishTrace());
                 document.getElementById('btn-osm').addEventListener('click', () => this.loadOsmReference());
                 document.getElementById('btn-preview').addEventListener('click', () => this.previewDetection());
-                document.getElementById('btn-add-to-layer').addEventListener('click', () => this.addToMainLayer());
                 document.getElementById('btn-clear-layer').addEventListener('click', () => this.clearAllRoads());
 
                 ['center-lat', 'center-lon'].forEach(id => {
@@ -740,7 +765,6 @@
             }
 
             async runDetection() {
-                document.getElementById('btn-add-to-layer').disabled = false;
                 this.detectedEdges = null;
                 this.vectorizedRoads = [];
                 this.currentSource = 'usgs_naip_edge_extraction';
@@ -797,6 +821,8 @@
                     if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
                     const info = await response.json();
                     button.disabled = !info.available;
+                    document.getElementById('btn-sam-point').disabled = !info.available;
+                    document.getElementById('btn-mapped-roads').disabled = false;
                     document.getElementById('btn-osm').disabled = false;
                     document.getElementById('osm-status').textContent = 'Load current-view OSM roads as a blue reference layer; reference roads are not exported.';
                     status.textContent = info.available
@@ -804,9 +830,346 @@
                         : `SAM unavailable: ${info.reason}`;
                 } catch (_) {
                     button.disabled = true;
+                    document.getElementById('btn-sam-point').disabled = true;
+                    document.getElementById('btn-mapped-roads').disabled = true;
                     document.getElementById('btn-osm').disabled = true;
                     status.textContent = 'SAM requires the local launcher; browser edge tracing remains available here.';
                 }
+            }
+
+            async checkRoadBackend() {
+                const status = document.getElementById('road-model-status');
+                try {
+                    const response = await fetch('/api/road-status', { cache: 'no-store' });
+                    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
+                    const info = await response.json();
+                    if (!info.available) throw new Error(info.reason || 'Model unavailable');
+                    document.getElementById('btn-road-model').disabled = this.featureType !== 'road';
+                    status.textContent = info.checkpoint_cached
+                        ? 'Road-specific model ready on CPU. Each image-derived centerline needs review.'
+                        : 'Road-specific model available. First run downloads its 57 MB checkpoint; each centerline needs review.';
+                } catch (error) {
+                    document.getElementById('btn-road-model').disabled = true;
+                    status.textContent = 'Automatic road detection requires the local launcher.';
+                }
+            }
+
+            setFeatureType() {
+                if (this.traceMode) this.toggleTrace();
+                if (this.promptMode) this.togglePromptMode();
+                this.featureType = document.getElementById('feature-type').value;
+                this.rejectPromptCandidate();
+                const building = this.featureType === 'building';
+                document.getElementById('btn-trace').textContent = building ? '✍️ Trace Building on Map' : '✍️ Trace Road on Map';
+                document.getElementById('trace-help').textContent = building
+                    ? 'Click around the visible roof boundary. Drag orange points to correct the footprint, then save it.'
+                    : 'Click along the road center. Drag yellow points to correct the line, then save it.';
+                document.getElementById('snap-osm').disabled = building;
+                document.getElementById('btn-mapped-roads').disabled = building || document.getElementById('btn-osm').disabled;
+                document.getElementById('btn-road-model').disabled = building || !document.getElementById('road-model-status').textContent.startsWith('Road-specific model');
+                this.mappedRoadCandidates = [];
+                this.mappedRoadLayer.clearLayers();
+                this.modelRoadCandidates = [];
+                this.modelRoadLayer.clearLayers();
+                this.setMode('ready', `Selected ${building ? 'building footprint' : 'road centerline'} tracing`);
+            }
+
+            togglePromptMode() {
+                if (this.promptMode) {
+                    this.promptMode = false;
+                    document.body.classList.remove('trace-active');
+                    document.getElementById('btn-sam-point').textContent = '🧠 Click Feature for SAM Trace (Local)';
+                    this.setMode('ready', 'SAM selection cancelled');
+                    return;
+                }
+                if (this.traceMode) this.toggleTrace();
+                this.promptMode = true;
+                document.body.classList.add('trace-active');
+                document.getElementById('btn-sam-point').textContent = '✕ Cancel SAM Selection';
+                this.setMode('tracing', `Click one visible ${this.featureType} in the aerial imagery for a SAM suggestion`);
+            }
+
+            async promptTraceAt(latlng) {
+                if (!this.promptMode) return;
+                this.togglePromptMode();
+                this.rejectPromptCandidate();
+                if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
+                    this.setMode('error', 'Wait for USGS aerial imagery to appear before tracing it');
+                    return;
+                }
+                const selectedType = this.featureType;
+                this.setMode('detecting', `Reading imagery around the selected ${selectedType}…`);
+                try {
+                    document.getElementById('center-lat').value = latlng.lat.toFixed(6);
+                    document.getElementById('center-lon').value = latlng.lng.toFixed(6);
+                    await this.captureMapArea();
+                    const image = await new Promise((resolve, reject) =>
+                        this.captureCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode image')), 'image/png'));
+                    const b = this.captureBounds;
+                    const sw = L.CRS.EPSG3857.project(L.latLng(b.minLat, b.minLon));
+                    const ne = L.CRS.EPSG3857.project(L.latLng(b.maxLat, b.maxLon));
+                    const form = new FormData();
+                    form.append('image', image, 'naip.png');
+                    form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
+                    form.append('seed_x', String(b.width / 2));
+                    form.append('seed_y', String(b.height / 2));
+                    form.append('feature_type', selectedType);
+                    this.setMode('detecting', `SAM tracing the selected ${selectedType} in USGS imagery…`);
+                    const response = await fetch('/api/sam-point', { method: 'POST', body: form });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+                    this.promptCandidate = result;
+                    const coords = result.geometry.type === 'Polygon' ? result.geometry.coordinates[0] : result.geometry.coordinates;
+                    const latLngs = coords.map(([lon, lat]) => [lat, lon]);
+                    const style = { color: selectedType === 'building' ? '#ff9b3d' : '#eb6cff', weight: 4, fillOpacity: 0.12, bubblingMouseEvents: false };
+                    const shape = result.geometry.type === 'Polygon' ? L.polygon(latLngs, style) : L.polyline(latLngs, style);
+                    this.promptLayer.clearLayers();
+                    shape.addTo(this.promptLayer);
+                    shape.on('click', () => this.showPromptCandidate());
+                    this.showPromptCandidate();
+                    this.setMode('ready', `SAM suggested a ${selectedType}; inspect the overlay before keeping it`);
+                } catch (error) {
+                    this.setMode('error', error.message);
+                }
+            }
+
+            showPromptCandidate() {
+                if (!this.promptCandidate) return;
+                const p = this.promptCandidate;
+                document.getElementById('feature-props').innerHTML = `
+                    <h4>${p.feature_type === 'building' ? 'Building footprint' : 'Road centerline'} suggestion</h4>
+                    <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">USGS NAIP + point-prompted SAM</span></div>
+                    <div class="prop-row"><span class="prop-key">SAM score</span><span class="prop-value">${p.score}</span></div>
+                    <p style="font-size:11px;line-height:1.4;">SAM has no feature labels. Keep this only if the overlay follows the selected object in the image.</p>
+                    <button class="btn btn-primary" onclick="detector.keepPromptCandidate()">Keep suggestion</button>
+                    <button class="btn btn-secondary" onclick="detector.rejectPromptCandidate()">Reject</button>`;
+            }
+
+            keepPromptCandidate() {
+                const p = this.promptCandidate;
+                if (!p) return;
+                const geometry = p.geometry;
+                this.allRoads.push({ type: 'Feature', geometry, properties: {
+                    id: `sam_${Date.now()}`, feature_type: p.feature_type, source: p.source,
+                    review_status: 'visually_kept_unverified', sam_score: p.score,
+                    detected_at: new Date().toISOString(),
+                    length_m: geometry.type === 'LineString' ? this.calculateGeoLength(geometry.coordinates) : undefined,
+                    area_m2: geometry.type === 'Polygon' ? this.calculateGeoArea(geometry.coordinates[0]) : undefined
+                }});
+                this.rejectPromptCandidate();
+                this.redrawAllRoads();
+                this.updateLayerCount();
+                this.setMode('ready', `Saved visually reviewed ${p.feature_type} suggestion`);
+            }
+
+            rejectPromptCandidate() {
+                this.promptCandidate = null;
+                if (this.promptLayer) this.promptLayer.clearLayers();
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
+            }
+
+            clipRoadLine(line, bounds) {
+                const xmin = bounds.minLon, xmax = bounds.maxLon, ymin = bounds.minLat, ymax = bounds.maxLat;
+                const parts = [];
+                let current = [];
+                for (let i = 1; i < line.length; i++) {
+                    const [x0, y0] = line[i - 1], [x1, y1] = line[i];
+                    const dx = x1 - x0, dy = y1 - y0;
+                    const p = [-dx, dx, -dy, dy], q = [x0 - xmin, xmax - x0, y0 - ymin, ymax - y0];
+                    let enter = 0, leave = 1, valid = true;
+                    for (let edge = 0; edge < 4; edge++) {
+                        if (p[edge] === 0) { if (q[edge] < 0) valid = false; continue; }
+                        const t = q[edge] / p[edge];
+                        if (p[edge] < 0) enter = Math.max(enter, t);
+                        else leave = Math.min(leave, t);
+                    }
+                    if (!valid || enter > leave) {
+                        if (current.length > 1) parts.push(current);
+                        current = [];
+                        continue;
+                    }
+                    const a = [x0 + enter * dx, y0 + enter * dy], b = [x0 + leave * dx, y0 + leave * dy];
+                    if (current.length && Math.hypot(current[current.length - 1][0] - a[0], current[current.length - 1][1] - a[1]) > 1e-8) {
+                        parts.push(current);
+                        current = [];
+                    }
+                    if (!current.length) current.push(a);
+                    current.push(b);
+                }
+                if (current.length > 1) parts.push(current);
+                return parts;
+            }
+
+            async showMappedRoads() {
+                if (this.featureType !== 'road') return;
+                if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
+                    this.setMode('error', 'Wait for USGS aerial imagery to appear before comparing mapped roads');
+                    return;
+                }
+                const b = this.captureBounds;
+                this.setMode('detecting', 'Loading mapped road centerlines for the aerial image area…');
+                try {
+                    const bbox = [b.minLon, b.minLat, b.maxLon, b.maxLat];
+                    const response = await fetch(`/api/osm-roads?bbox=${encodeURIComponent(bbox.join(','))}`);
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+                    const roadTypes = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'living_street', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link']);
+                    this.mappedRoadCandidates = data.features
+                        .filter(f => roadTypes.has(f.properties.highway))
+                        .flatMap(f => this.clipRoadLine(f.geometry.coordinates, b).map(coordinates => ({ coordinates, highway: f.properties.highway, name: f.properties.name, osm_id: f.properties.osm_id })))
+                        .filter(f => this.calculateGeoLength(f.coordinates) >= 10);
+                    this.drawMappedRoads();
+                    this.setMode('ready', `${this.mappedRoadCandidates.length} OSM-mapped road segments over the aerial image. These are map data, not image detections; review against imagery.`);
+                } catch (error) {
+                    this.setMode('error', error.message);
+                }
+            }
+
+            drawMappedRoads() {
+                this.mappedRoadLayer.clearLayers();
+                this.mappedRoadCandidates.forEach((road, index) => {
+                    const shape = L.polyline(road.coordinates.map(([lon, lat]) => [lat, lon]), { color: '#ff4242', weight: 3, opacity: 0.85, bubblingMouseEvents: false });
+                    shape.on('click', () => this.showMappedRoadCandidate(index));
+                    shape.addTo(this.mappedRoadLayer);
+                });
+            }
+
+            showMappedRoadCandidate(index) {
+                const road = this.mappedRoadCandidates[index];
+                if (!road) return;
+                document.getElementById('feature-props').innerHTML = `
+                    <h4>Mapped road #${index + 1}</h4>
+                    <div class="prop-row"><span class="prop-key">Type</span><span class="prop-value">${road.highway}</span></div>
+                    <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${this.calculateGeoLength(road.coordinates)} m</span></div>
+                    <p style="font-size:11px;line-height:1.4;">From OpenStreetMap. Compare the red line with the aerial road before keeping it.</p>
+                    <button class="btn btn-primary" onclick="detector.keepMappedRoad(${index})">Keep road</button>
+                    <button class="btn btn-secondary" onclick="detector.rejectMappedRoad(${index})">Reject</button>`;
+            }
+
+            keepMappedRoad(index) {
+                const road = this.mappedRoadCandidates[index];
+                if (!road) return;
+                this.allRoads.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: road.coordinates }, properties: {
+                    id: `osm_${road.osm_id}_${Date.now()}`, feature_type: 'road', highway: road.highway,
+                    source: 'openstreetmap_reference_over_usgs_naip', review_status: 'visually_kept_unverified',
+                    length_m: this.calculateGeoLength(road.coordinates), detected_at: new Date().toISOString()
+                }});
+                this.rejectMappedRoad(index);
+                this.redrawAllRoads();
+                this.updateLayerCount();
+                this.setMode('ready', 'Saved reviewed OSM road; edit geometry if it does not follow the aerial image');
+            }
+
+            rejectMappedRoad(index) {
+                if (!this.mappedRoadCandidates[index]) return;
+                this.mappedRoadCandidates.splice(index, 1);
+                this.drawMappedRoads();
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
+            }
+
+            async findRoadsInImagery() {
+                if (this.featureType !== 'road') return;
+                if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
+                    this.setMode('error', 'Wait for USGS aerial imagery to appear before detecting roads');
+                    return;
+                }
+                const button = document.getElementById('btn-road-model');
+                button.disabled = true;
+                this.modelRoadCandidates = [];
+                this.modelRoadLayer.clearLayers();
+                this.setMode('detecting', 'Capturing aerial imagery for road detection…');
+                try {
+                    await this.captureMapArea();
+                    const image = await new Promise((resolve, reject) =>
+                        this.captureCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode image')), 'image/png'));
+                    const b = this.captureBounds;
+                    const sw = L.CRS.EPSG3857.project(L.latLng(b.minLat, b.minLon));
+                    const ne = L.CRS.EPSG3857.project(L.latLng(b.maxLat, b.maxLon));
+                    const form = new FormData();
+                    form.append('image', image, 'naip.png');
+                    form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
+                    const response = await fetch('/api/road-detect', { method: 'POST', body: form });
+                    if (!response.ok || !response.body) {
+                        const detail = await response.json().catch(() => ({}));
+                        throw new Error(detail.error || `HTTP ${response.status}`);
+                    }
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let pending = '';
+                    const handle = line => {
+                        if (!line.trim()) return;
+                        const message = JSON.parse(line);
+                        if (message.type === 'error') throw new Error(message.message);
+                        if (message.type === 'status') this.setMode('detecting', message.message);
+                        if (message.type === 'line') {
+                            this.modelRoadCandidates.push({ coordinates: message.coordinates, confidence: message.confidence });
+                            this.drawModelRoads();
+                            this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
+                            this.setMode('detecting', `${this.modelRoadCandidates.length} image-derived road centerlines displayed…`);
+                        }
+                        if (message.type === 'done') this.setMode('ready', `${this.modelRoadCandidates.length} road centerline proposals from the aerial image. Select a purple line to review it.`);
+                    };
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        pending += decoder.decode(value, { stream: true });
+                        let newline;
+                        while ((newline = pending.indexOf('\n')) >= 0) {
+                            handle(pending.slice(0, newline));
+                            pending = pending.slice(newline + 1);
+                        }
+                    }
+                    if (pending.trim()) handle(pending);
+                } catch (error) {
+                    this.setMode('error', error.message);
+                } finally {
+                    button.disabled = this.featureType !== 'road';
+                }
+            }
+
+            drawModelRoads() {
+                this.modelRoadLayer.clearLayers();
+                this.modelRoadCandidates.forEach((road, index) => {
+                    const shape = L.polyline(road.coordinates.map(([lon, lat]) => [lat, lon]), {
+                        color: '#dd6bff', weight: 4, opacity: 0.9, bubblingMouseEvents: false
+                    });
+                    shape.on('click', () => this.showModelRoadCandidate(index));
+                    shape.addTo(this.modelRoadLayer);
+                });
+            }
+
+            showModelRoadCandidate(index) {
+                const road = this.modelRoadCandidates[index];
+                if (!road) return;
+                document.getElementById('feature-props').innerHTML = `
+                    <h4>Image road proposal #${index + 1}</h4>
+                    <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${this.calculateGeoLength(road.coordinates)} m</span></div>
+                    <div class="prop-row"><span class="prop-key">Model score</span><span class="prop-value">${road.confidence}</span></div>
+                    <p style="font-size:11px;line-height:1.4;">Predicted from USGS NAIP pixels. Check alignment and gaps before keeping it.</p>
+                    <button class="btn btn-primary" onclick="detector.keepModelRoad(${index})">Keep road</button>
+                    <button class="btn btn-secondary" onclick="detector.rejectModelRoad(${index})">Reject</button>`;
+            }
+
+            keepModelRoad(index) {
+                const road = this.modelRoadCandidates[index];
+                if (!road) return;
+                this.allRoads.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: road.coordinates }, properties: {
+                    id: `road_model_${Date.now()}_${index}`, feature_type: 'road', source: 'usgs_naip_road_segmentation_BAH',
+                    review_status: 'visually_kept_unverified', model_score: road.confidence,
+                    length_m: this.calculateGeoLength(road.coordinates), detected_at: new Date().toISOString()
+                }});
+                this.rejectModelRoad(index);
+                this.redrawAllRoads();
+                this.updateLayerCount();
+                this.setMode('ready', 'Saved image-derived road; select it to edit its centerline');
+            }
+
+            rejectModelRoad(index) {
+                if (!this.modelRoadCandidates[index]) return;
+                this.modelRoadCandidates.splice(index, 1);
+                this.drawModelRoads();
+                this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
             }
 
             async loadOsmReference() {
@@ -832,7 +1195,7 @@
             }
 
             snapToOsm(latlng) {
-                if (!document.getElementById('snap-osm').checked || !this.osmRoads.length) return latlng;
+                if (this.traceFeatureType !== 'road' || !document.getElementById('snap-osm').checked || !this.osmRoads.length) return latlng;
                 const click = this.map.latLngToContainerPoint(latlng);
                 let best = { distance: 8, point: null };
                 for (const line of this.osmRoads) {
@@ -855,18 +1218,24 @@
                     this.tracePoints = [];
                     this.traceLayer.clearLayers();
                     this.editIndex = null;
+                    document.getElementById('feature-type').disabled = false;
                     document.body.classList.remove('trace-active');
-                    document.getElementById('btn-trace').textContent = '✍️ Trace Road on Map';
+                    document.getElementById('btn-trace').textContent = this.featureType === 'building' ? '✍️ Trace Building on Map' : '✍️ Trace Road on Map';
                     document.getElementById('btn-undo-point').disabled = true;
                     document.getElementById('btn-finish-trace').disabled = true;
                     this.setMode('ready', 'Trace cancelled');
                     return;
                 }
+                if (this.promptMode) this.togglePromptMode();
                 this.traceMode = true;
+                this.traceFeatureType = this.featureType;
                 this.tracePoints = [];
+                document.getElementById('feature-type').disabled = true;
                 document.body.classList.add('trace-active');
                 document.getElementById('btn-trace').textContent = '✕ Cancel Trace';
-                this.setMode('tracing', 'Click road center points on the map; drag yellow vertices to correct them');
+                this.setMode('tracing', this.traceFeatureType === 'building'
+                    ? 'Click around the visible building roof; drag orange vertices to correct the footprint'
+                    : 'Click road center points on the map; drag yellow vertices to correct them');
             }
 
             addTracePoint(latlng) {
@@ -883,13 +1252,17 @@
             renderTrace() {
                 this.traceLayer.clearLayers();
                 this.traceLine = null;
+                const building = this.traceFeatureType === 'building';
+                const color = building ? '#ff9b3d' : '#ffcc33';
                 if (this.tracePoints.length > 1) {
-                    this.traceLine = L.polyline(this.tracePoints, { color: '#ffcc33', weight: 4, opacity: 0.95, interactive: false }).addTo(this.traceLayer);
+                    this.traceLine = building && this.tracePoints.length > 2
+                        ? L.polygon(this.tracePoints, { color, weight: 4, fillOpacity: 0.12, interactive: false }).addTo(this.traceLayer)
+                        : L.polyline(this.tracePoints, { color, weight: 4, opacity: 0.95, interactive: false }).addTo(this.traceLayer);
                 }
                 for (let i = 0; i < this.tracePoints.length; i++) {
                     const marker = L.marker(this.tracePoints[i], {
                         draggable: true, bubblingMouseEvents: false,
-                        icon: L.divIcon({ className: 'trace-point', iconSize: [12, 12], iconAnchor: [6, 6] })
+                        icon: L.divIcon({ className: 'trace-point', html: building ? '<span style="display:block;width:12px;height:12px;background:#ff9b3d;border-radius:50%"></span>' : '', iconSize: [12, 12], iconAnchor: [6, 6] })
                     }).addTo(this.traceLayer);
                     marker.on('drag', () => {
                         this.tracePoints[i] = marker.getLatLng();
@@ -897,19 +1270,24 @@
                     });
                 }
                 document.getElementById('btn-undo-point').disabled = this.tracePoints.length === 0;
-                document.getElementById('btn-finish-trace').disabled = this.tracePoints.length < 2;
-                this.setMode('tracing', `${this.tracePoints.length} road center points — save when the yellow line follows the road`);
+                document.getElementById('btn-finish-trace').disabled = this.tracePoints.length < (building ? 3 : 2);
+                this.setMode('tracing', `${this.tracePoints.length} ${building ? 'building boundary' : 'road center'} points — save when the outline follows the imagery`);
             }
 
             finishTrace() {
-                if (this.tracePoints.length < 2) return;
+                const building = this.traceFeatureType === 'building';
+                if (this.tracePoints.length < (building ? 3 : 2)) return;
                 const coordinates = this.tracePoints.map(point => [Number(point.lng.toFixed(7)), Number(point.lat.toFixed(7))]);
+                if (building) coordinates.push([...coordinates[0]]);
+                if (building && this.calculateGeoArea(coordinates) < 1) { this.setMode('error', 'Building footprint is too small'); return; }
+                if (!building && this.calculateGeoLength(coordinates) < 1) { this.setMode('error', 'Road trace is too short'); return; }
                 const feature = {
-                    type: 'Feature', geometry: { type: 'LineString', coordinates },
+                    type: 'Feature', geometry: building ? { type: 'Polygon', coordinates: [coordinates] } : { type: 'LineString', coordinates },
                     properties: {
                         id: this.editIndex === null ? `trace_${Date.now()}` : this.allRoads[this.editIndex].properties.id,
-                        source: 'user_traced_from_usgs_naip', review_status: 'user_traced_unverified',
-                        detected_at: new Date().toISOString(), length_m: this.calculateGeoLength(coordinates)
+                        feature_type: this.traceFeatureType, source: 'user_traced_from_usgs_naip', review_status: 'user_traced_unverified',
+                        detected_at: new Date().toISOString(),
+                        ...(building ? { area_m2: this.calculateGeoArea(coordinates) } : { length_m: this.calculateGeoLength(coordinates) })
                     }
                 };
                 const edited = this.editIndex !== null;
@@ -919,18 +1297,22 @@
                 this.redrawAllRoads();
                 if (this.vectorizedRoads.length) this.displayVectorizedRoads(this.vectorizedRoads);
                 this.updateLayerCount();
-                this.setMode('ready', edited ? 'Saved corrected road trace' : 'Saved road trace to export layer');
+                this.setMode('ready', edited ? `Saved corrected ${building ? 'building footprint' : 'road centerline'}` : `Saved ${building ? 'building footprint' : 'road centerline'} to export layer`);
             }
 
             startEditFeature(index) {
                 const feature = this.allRoads[index];
                 if (!feature) return;
                 if (this.traceMode) this.toggleTrace();
+                const featureType = feature.properties.feature_type || (feature.geometry.type === 'Polygon' ? 'building' : 'road');
+                document.getElementById('feature-type').value = featureType;
+                this.setFeatureType();
                 this.toggleTrace();
                 this.editIndex = index;
-                this.tracePoints = feature.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon));
+                const coords = feature.geometry.type === 'Polygon' ? feature.geometry.coordinates[0].slice(0, -1) : feature.geometry.coordinates;
+                this.tracePoints = coords.map(([lon, lat]) => L.latLng(lat, lon));
                 this.renderTrace();
-                this.setMode('tracing', 'Drag yellow vertices or click to extend; save the corrected line');
+                this.setMode('tracing', 'Drag vertices or click to extend; save the corrected feature');
             }
 
             deleteFeature(index) {
@@ -946,7 +1328,6 @@
             async runSamTrace() {
                 const button = document.getElementById('btn-sam');
                 button.disabled = true;
-                document.getElementById('btn-add-to-layer').disabled = true;
                 this.vectorizedRoads = [];
                 this.detectedEdges = null;
                 this.currentSource = 'usgs_naip_sam_mask_heuristic';
@@ -1369,39 +1750,22 @@
                 });
             }
 
-            addToMainLayer() {
-                if (this.currentSource === 'usgs_naip_sam_mask_heuristic') {
-                    this.setMode('ready', 'Select each SAM proposal on the map and keep or reject it after visual review');
-                    return;
-                }
-                if (this.vectorizedRoads.length === 0) { alert('No candidates to add. Try a lower minimum line length or a different area.'); return; }
-
-                const timestamp = new Date().toISOString();
-                const newRoads = this.vectorizedRoads.map((line, idx) => ({
-                    type: 'Feature',
-                    geometry: { type: 'LineString', coordinates: line },
-                    properties: {
-                        id: `road_${Date.now()}_${idx}`,
-                        source: this.currentSource,
-                        review_status: 'unverified',
-                        detected_at: timestamp,
-                        length_m: this.calculateGeoLength(line)
-                    }
-                }));
-
-                this.allRoads.push(...newRoads);
-                this.redrawAllRoads();
-                this.updateLayerCount();
-                this.vectorizedRoads = [];
-                this.setMode('ready', `Added ${newRoads.length} candidates to layer (Total: ${this.allRoads.length})`);
-            }
-
             calculateGeoLength(line) {
                 let length = 0;
                 for (let i = 1; i < line.length; i++) {
                     length += this.haversineDistance(line[i-1][1], line[i-1][0], line[i][1], line[i][0]);
                 }
                 return Math.round(length);
+            }
+
+            calculateGeoArea(ring) {
+                const points = ring.map(([lon, lat]) => L.CRS.EPSG3857.project(L.latLng(lat, lon)));
+                let twiceArea = 0;
+                for (let i = 1; i < points.length; i++) {
+                    twiceArea += points[i - 1].x * points[i].y - points[i].x * points[i - 1].y;
+                }
+                const midLatitude = ring.reduce((sum, point) => sum + point[1], 0) / ring.length;
+                return Math.round(Math.abs(twiceArea) / 2 * Math.cos(midLatitude * Math.PI / 180) ** 2);
             }
 
             haversineDistance(lat1, lon1, lat2, lon2) {
@@ -1417,11 +1781,14 @@
                 const weight = parseInt(document.getElementById('line-weight').value);
 
                 this.allRoads.forEach((feature, idx) => {
-                    const latLngs = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-                    const savedColor = feature.properties.source === 'user_traced_from_usgs_naip' ? '#ffcc33' : color;
-                    const polyline = L.polyline(latLngs, { color: savedColor, weight: Math.max(weight, 4), opacity: 0.9, bubblingMouseEvents: false });
-                    polyline.on('click', () => this.showFeatureProperties(feature.geometry.coordinates, idx, { ...feature.properties, saved: true }));
-                    this.roadLayer.addLayer(polyline);
+                    const building = feature.geometry.type === 'Polygon';
+                    const coords = building ? feature.geometry.coordinates[0] : feature.geometry.coordinates;
+                    const latLngs = coords.map(([lon, lat]) => [lat, lon]);
+                    const savedColor = building ? '#ff9b3d' : feature.properties.source === 'user_traced_from_usgs_naip' ? '#ffcc33' : color;
+                    const style = { color: savedColor, weight: Math.max(weight, 4), opacity: 0.9, fillOpacity: 0.12, bubblingMouseEvents: false };
+                    const shape = building ? L.polygon(latLngs, style) : L.polyline(latLngs, style);
+                    shape.on('click', () => this.showFeatureProperties(coords, idx, { ...feature.properties, saved: true }));
+                    this.roadLayer.addLayer(shape);
                 });
             }
 
@@ -1440,8 +1807,10 @@
             }
 
             updateLayerCount() {
-                const totalLength = this.allRoads.reduce((sum, f) => sum + (f.properties.length_m || 0), 0);
-                document.getElementById('layer-count').textContent = `${this.allRoads.length} features • ${(totalLength/1000).toFixed(2)} km`;
+                const roads = this.allRoads.filter(f => f.geometry.type === 'LineString');
+                const buildings = this.allRoads.filter(f => f.geometry.type === 'Polygon');
+                const totalLength = roads.reduce((sum, f) => sum + (f.properties.length_m || 0), 0);
+                document.getElementById('layer-count').textContent = `${roads.length} lines • ${buildings.length} buildings • ${(totalLength/1000).toFixed(2)} km roads`;
             }
 
             toggleLayerVisibility(visible) {
@@ -1452,20 +1821,21 @@
             zoomToLayer() {
                 if (this.allRoads.length === 0) return;
                 const bounds = L.latLngBounds();
-                this.allRoads.forEach(f => f.geometry.coordinates.forEach(([lon, lat]) => bounds.extend([lat, lon])));
+                this.allRoads.forEach(f => (f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates).forEach(([lon, lat]) => bounds.extend([lat, lon])));
                 this.map.fitBounds(bounds, { padding: [50, 50] });
             }
 
             showFeatureProperties(line, idx, properties = {}) {
-                const length = properties.length_m || this.calculateGeoLength(line);
+                const building = properties.feature_type === 'building';
+                const length = building ? properties.area_m2 || this.calculateGeoArea(line) : properties.length_m || this.calculateGeoLength(line);
                 const actions = properties.candidate
                     ? `<button class="btn btn-primary" onclick="detector.keepCandidate(${idx})">Keep line</button> <button class="btn btn-secondary" onclick="detector.rejectCandidate(${idx})">Reject</button>`
                     : properties.saved
                         ? `<button class="btn btn-primary" onclick="detector.startEditFeature(${idx})">Edit trace</button> <button class="btn btn-secondary" onclick="detector.deleteFeature(${idx})">Delete</button>`
                         : '';
                 document.getElementById('feature-props').innerHTML = `
-                    <h4>${properties.saved ? 'Saved Line' : 'Line Candidate'} #${idx + 1}</h4>
-                    <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${length.toLocaleString()} m</span></div>
+                    <h4>${properties.saved ? (building ? 'Saved Building' : 'Saved Line') : 'Unclassified Line Candidate'} #${idx + 1}</h4>
+                    <div class="prop-row"><span class="prop-key">${building ? 'Area' : 'Length'}</span><span class="prop-value">${length.toLocaleString()} ${building ? 'm²' : 'm'}</span></div>
                     <div class="prop-row"><span class="prop-key">Vertices</span><span class="prop-value">${line.length}</span></div>
                     <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">${properties.source || 'USGS NAIP edge extraction'}</span></div>
                     <div class="prop-row"><span class="prop-key">Start</span><span class="prop-value">${line[0][1].toFixed(6)}, ${line[0][0].toFixed(6)}</span></div>
@@ -1480,7 +1850,7 @@
                 this.allRoads.push({
                     type: 'Feature', geometry: { type: 'LineString', coordinates: line },
                     properties: {
-                        id: `reviewed_${Date.now()}`, source: this.currentSource,
+                        id: `reviewed_${Date.now()}`, feature_type: 'unclassified', source: this.currentSource,
                         review_status: 'visually_kept_unverified', detected_at: new Date().toISOString(),
                         length_m: this.calculateGeoLength(line)
                     }
@@ -1500,12 +1870,17 @@
             }
 
             clearAllRoads() {
-                if (this.allRoads.length > 0 && !confirm('Clear all detected roads?')) return;
+                if (this.allRoads.length > 0 && !confirm('Clear all saved features?')) return;
                 this.allRoads = [];
                 this.vectorizedRoads = [];
+                this.mappedRoadCandidates = [];
+                this.modelRoadCandidates = [];
                 this.roadLayer.clearLayers();
+                this.mappedRoadLayer.clearLayers();
+                this.modelRoadLayer.clearLayers();
+                this.rejectPromptCandidate();
                 this.updateLayerCount();
-                this.setMode('ready', 'All roads cleared');
+                this.setMode('ready', 'All saved features cleared');
                 document.getElementById('stat-roads').textContent = '0';
                 document.getElementById('stat-length').innerHTML = '0<span class="stat-unit">m</span>';
                 document.getElementById('stat-vertices').textContent = '0';
@@ -1513,12 +1888,12 @@
             }
 
             exportLayer(format) {
-                if (this.allRoads.length === 0) { alert('No line candidates to export.'); return; }
+                if (this.allRoads.length === 0) { alert('No reviewed features to export.'); return; }
 
                 const geojson = {
                     type: 'FeatureCollection',
                     features: this.allRoads,
-                    properties: { name: 'Unverified Line Candidates', created: new Date().toISOString(), source: 'AetherMap / USGS NAIP' }
+                    properties: { name: 'AetherMap reviewed features', created: new Date().toISOString() }
                 };
 
                 let content, filename, mimeType;
@@ -1526,22 +1901,22 @@
                 switch (format) {
                     case 'geojson':
                         content = JSON.stringify(geojson, null, 2);
-                        filename = 'unverified_line_candidates.geojson';
+                        filename = 'aethermap_reviewed_features.geojson';
                         mimeType = 'application/json';
                         break;
                     case 'kml':
                         content = this.toKML(geojson);
-                        filename = 'unverified_line_candidates.kml';
+                        filename = 'aethermap_reviewed_features.kml';
                         mimeType = 'application/xml';
                         break;
                     case 'wkt':
                         content = this.toWKT(geojson);
-                        filename = 'unverified_line_candidates.wkt';
+                        filename = 'aethermap_reviewed_features.wkt';
                         mimeType = 'text/plain';
                         break;
                     case 'osm':
                         content = this.toOSM(geojson);
-                        filename = 'unverified_line_candidates.osm';
+                        filename = 'aethermap_reviewed_features.osm';
                         mimeType = 'application/xml';
                         break;
                 }
@@ -1555,16 +1930,19 @@
 
             toKML(geojson) {
                 const placemarks = geojson.features.map((f, i) => {
-                    const coords = f.geometry.coordinates.map(c => `${c[0]},${c[1]},0`).join(' ');
-                    return `<Placemark><name>Unverified line ${i + 1}</name><LineString><coordinates>${coords}</coordinates></LineString></Placemark>`;
+                    const coords = (f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates).map(c => `${c[0]},${c[1]},0`).join(' ');
+                    const geometry = f.geometry.type === 'Polygon'
+                        ? `<Polygon><outerBoundaryIs><LinearRing><coordinates>${coords}</coordinates></LinearRing></outerBoundaryIs></Polygon>`
+                        : `<LineString><coordinates>${coords}</coordinates></LineString>`;
+                    return `<Placemark><name>Reviewed ${f.properties.feature_type || 'unclassified'} ${i + 1}</name>${geometry}</Placemark>`;
                 }).join('\n');
-                return `<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Unverified Line Candidates</name>${placemarks}</Document></kml>`;
+                return `<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>AetherMap reviewed features</name>${placemarks}</Document></kml>`;
             }
 
             toWKT(geojson) {
                 return geojson.features.map((f, i) => {
-                    const coords = f.geometry.coordinates.map(c => `${c[0]} ${c[1]}`).join(', ');
-                    return `-- Unverified line ${i + 1}\nLINESTRING(${coords})`;
+                    const coords = (f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates).map(c => `${c[0]} ${c[1]}`).join(', ');
+                    return f.geometry.type === 'Polygon' ? `POLYGON((${coords}))` : `LINESTRING(${coords})`;
                 }).join('\n\n');
             }
 
@@ -1574,12 +1952,19 @@
 
                 geojson.features.forEach(f => {
                     const wayNodes = [];
-                    f.geometry.coordinates.forEach(([lon, lat]) => {
+                    const coords = f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates;
+                    let firstNode = null;
+                    coords.forEach(([lon, lat], index) => {
+                        if (f.geometry.type === 'Polygon' && index === coords.length - 1) {
+                            wayNodes.push(`<nd ref="${firstNode}"/>`);
+                            return;
+                        }
+                        if (firstNode === null) firstNode = nodeId;
                         nodes.push(`<node id="${nodeId}" lat="${lat}" lon="${lon}"/>`);
                         wayNodes.push(`<nd ref="${nodeId}"/>`);
                         nodeId--;
                     });
-                    ways.push(`<way id="${wayId}">${wayNodes.join('')}<tag k="source" v="${f.properties.source}"/><tag k="review_status" v="${f.properties.review_status}"/></way>`);
+                    ways.push(`<way id="${wayId}">${wayNodes.join('')}<tag k="feature_type" v="${f.properties.feature_type || 'unclassified'}"/><tag k="source" v="${f.properties.source}"/><tag k="review_status" v="${f.properties.review_status}"/></way>`);
                     wayId--;
                 });
 

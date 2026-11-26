@@ -22,6 +22,7 @@ CHECKPOINT = Path.home() / ".cache" / "sam" / "sam_vit_h_4b8939.pth"
 app = Flask(__name__, static_folder=None)
 LOCAL_PORT = int(os.environ.get("AETHERMAP_PORT", "8767"))
 model_lock = threading.Lock()
+road_lock = threading.Lock()
 mask_generator = None
 
 
@@ -134,6 +135,65 @@ def candidate_paths(mask, min_pixels):
     return trace_skeleton(binary, min_pixels)
 
 
+def prompted_geometry(mask, feature_type, seed, bbox, width, height):
+    """Convert one user-seeded SAM mask to the geometry of the chosen class."""
+    import cv2
+    import numpy as np
+
+    binary = mask.astype(np.uint8)
+    if feature_type == "building":
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(contour)
+        if area < 40 or area > binary.size * 0.15:
+            return None
+        epsilon = max(1.0, 0.006 * cv2.arcLength(contour, True))
+        ring = cv2.approxPolyDP(contour, epsilon, True).reshape(-1, 2).tolist()
+        if len(ring) < 3:
+            return None
+        ring.append(ring[0])
+        return {"type": "Polygon", "coordinates": [pixel_to_lonlat(ring, bbox, width, height)]}
+
+    paths = trace_skeleton(binary, min_pixels=12)
+    if not paths:
+        return None
+    x, y = seed
+    ranked = []
+    for path in paths:
+        distance = min((px - x) ** 2 + (py - y) ** 2 for px, py in path)
+        length = sum(math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]) for i in range(1, len(path)))
+        ranked.append((distance, -length, path))
+    distance, _, path = min(ranked)
+    if distance > 30 ** 2 or len(path) < 12:
+        return None
+    return {"type": "LineString", "coordinates": pixel_to_lonlat(path, bbox, width, height)}
+
+
+def road_centerlines(probability, threshold=0.5, min_pixels=12):
+    """Skeletonize predicted road pixels into ordered centerline paths."""
+    import cv2
+    import numpy as np
+
+    binary = (probability >= threshold).astype(np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, 8)
+    cleaned = np.zeros_like(binary)
+    for component in range(1, count):
+        if stats[component, cv2.CC_STAT_AREA] >= 20:
+            cleaned[labels == component] = 1
+    paths = trace_skeleton(cleaned, min_pixels)
+    results = []
+    for path in paths:
+        points = cv2.approxPolyDP(np.asarray(path, dtype=np.float32).reshape(-1, 1, 2), 1.0, False).reshape(-1, 2)
+        if len(points) < 2:
+            continue
+        score = float(np.mean([probability[y, x] for x, y in path]))
+        results.append((score, [(float(x), float(y)) for x, y in points]))
+    return sorted(results, key=lambda item: -len(item[1]))
+
+
 @app.get("/")
 def home():
     return send_from_directory(ROOT, "index.html")
@@ -149,6 +209,16 @@ def sam_status():
     except ImportError as exc:
         available, reason = False, f"Missing Python package: {exc.name}"
     return jsonify(available=available, loaded=mask_generator is not None, reason=reason, model="SAM ViT-H", device="CPU")
+
+
+@app.get("/api/road-status")
+def road_status():
+    try:
+        import torch  # noqa: F401
+        from road_model import weights_ready
+        return jsonify(available=True, checkpoint_cached=weights_ready(), model="Road segmentation TorchScript", device="CPU")
+    except ImportError as exc:
+        return jsonify(available=False, reason=f"Missing Python package: {exc.name}"), 503
 
 
 @app.get("/api/osm-roads")
@@ -243,6 +313,110 @@ def sam_trace():
             yield event("error", message=f"SAM scan failed: {exc}")
         finally:
             model_lock.release()
+
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/sam-point")
+def sam_point():
+    """Trace only the image object selected by a user click; SAM has no class labels."""
+    import numpy as np
+    from PIL import Image
+
+    origin = request.headers.get("Origin")
+    if origin and origin != f"http://127.0.0.1:{LOCAL_PORT}":
+        return jsonify(error="This local model only accepts requests from its own page"), 403
+    if request.content_length and request.content_length > 8_000_000:
+        return jsonify(error="Image upload is too large"), 413
+    try:
+        feature_type = request.form["feature_type"]
+        if feature_type not in {"road", "building"}:
+            raise ValueError("Choose road or building")
+        bbox = [float(v) for v in json.loads(request.form["bbox3857"])]
+        if len(bbox) != 4 or not all(math.isfinite(v) for v in bbox) or bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+            raise ValueError("Invalid bounding box")
+        Image.MAX_IMAGE_PIXELS = 2_000_000
+        image = Image.open(io.BytesIO(request.files["image"].read())).convert("RGB")
+        if image.width != image.height or image.width < 256 or image.width > 1024:
+            raise ValueError("Expected a square 256-1024 pixel image")
+        x, y = float(request.form["seed_x"]), float(request.form["seed_y"])
+        if not all(math.isfinite(v) for v in (x, y)) or not (0 <= x < image.width and 0 <= y < image.height):
+            raise ValueError("Selected point is outside the image")
+    except (KeyError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify(error=str(exc)), 400
+
+    if not model_lock.acquire(blocking=False):
+        return jsonify(error="Another SAM trace is running"), 409
+    try:
+        generator = load_generator()
+        predictor = generator.predictor
+        predictor.set_image(np.asarray(image))
+        masks, scores, _ = predictor.predict(
+            point_coords=np.array([[x, y]], dtype=np.float32),
+            point_labels=np.array([1], dtype=np.int32),
+            multimask_output=True,
+        )
+        choices = []
+        for mask, score in zip(masks, scores):
+            geometry = prompted_geometry(mask, feature_type, (x, y), bbox, image.width, image.height)
+            if geometry:
+                choices.append((float(score), geometry))
+        if not choices:
+            return jsonify(error="No usable outline at that point. Choose a clearer spot or trace manually."), 422
+        score, geometry = max(choices, key=lambda item: item[0])
+        return jsonify(geometry=geometry, feature_type=feature_type, score=round(score, 3), source="usgs_naip_sam_point_prompt", review_status="unverified")
+    except Exception as exc:
+        app.logger.exception("SAM point trace failed")
+        return jsonify(error=f"SAM point trace failed: {exc}"), 500
+    finally:
+        model_lock.release()
+
+
+@app.post("/api/road-detect")
+def road_detect():
+    """Infer road pixels from the submitted NAIP image and return centerlines."""
+    from PIL import Image
+
+    origin = request.headers.get("Origin")
+    if origin and origin != f"http://127.0.0.1:{LOCAL_PORT}":
+        return jsonify(error="This local model only accepts requests from its own page"), 403
+    if request.content_length and request.content_length > 8_000_000:
+        return jsonify(error="Image upload is too large"), 413
+    try:
+        bbox = [float(v) for v in json.loads(request.form["bbox3857"])]
+        if len(bbox) != 4 or not all(math.isfinite(v) for v in bbox) or bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+            raise ValueError("Invalid bounding box")
+        threshold = float(request.form.get("threshold", 0.5))
+        if not math.isfinite(threshold) or not 0.2 <= threshold <= 0.9:
+            raise ValueError("Road threshold must be between 0.2 and 0.9")
+        Image.MAX_IMAGE_PIXELS = 2_000_000
+        image = Image.open(io.BytesIO(request.files["image"].read())).convert("RGB")
+        if image.width != image.height or image.width not in {512, 1024}:
+            raise ValueError("Expected a 512 or 1024 pixel square image")
+    except (KeyError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify(error=str(exc)), 400
+
+    def generate():
+        if not road_lock.acquire(blocking=False):
+            yield event("error", message="Another road scan is already running")
+            return
+        try:
+            from road_model import predict_road_probability
+
+            yield event("status", message="Loading road-specific model…")
+            probability = predict_road_probability(image)
+            yield event("status", message="Extracting road centerlines from predicted road pixels…")
+            paths = road_centerlines(probability, threshold)
+            for score, path in paths[:200]:
+                coordinates = pixel_to_lonlat(path, bbox, 256, 256)
+                if len(coordinates) > 1:
+                    yield event("line", coordinates=coordinates, confidence=round(score, 3))
+            yield event("done", lines=min(len(paths), 200), model="road_segmentation_BAH", threshold=threshold)
+        except Exception as exc:
+            app.logger.exception("Road detection failed")
+            yield event("error", message=f"Road detection failed: {exc}")
+        finally:
+            road_lock.release()
 
     return Response(stream_with_context(generate()), mimetype="application/x-ndjson", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
