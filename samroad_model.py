@@ -20,8 +20,10 @@ ROOT = Path(__file__).resolve().parent
 CACHE = Path.home() / ".cache" / "aethermap"
 SOURCE = CACHE / "sam_road"
 CITYSCALE = ROOT / "cityscale_vitb_512_e10.ckpt"
+CITYSCALE_INFERENCE = CACHE / "cityscale_inference_state.pt"
 SAM_VIT_B = CACHE / "sam_vit_b_01ec64.pth"
 CITYSCALE_SHA256 = "f1369a067d3cf3126324457fb80e499a74ea126dc23df94eef502e7c1fe51445"
+CITYSCALE_INFERENCE_SHA256 = "4a5df0ce08333e91b35bc7d022deb5117d26d29f7a607b85e4201f3cf11337f3"
 SAM_VIT_B_SHA256 = "ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912"
 _net = None
 _config = None
@@ -33,7 +35,9 @@ def availability() -> tuple[bool, str]:
         return False, "Original SAM-Road code and submodules are missing"
     if not (SOURCE / "config" / "toponet_vitb_512_cityscale.yaml").is_file():
         return False, "CityScale configuration is missing"
-    if not CITYSCALE.is_file() or CITYSCALE.stat().st_size != 1_054_078_423:
+    slim_ready = CITYSCALE_INFERENCE.is_file() and CITYSCALE_INFERENCE.stat().st_size == 351_352_571
+    original_ready = CITYSCALE.is_file() and CITYSCALE.stat().st_size == 1_054_078_423
+    if not slim_ready and not original_ready:
         return False, "CityScale trained checkpoint is missing"
     if not SAM_VIT_B.is_file() or SAM_VIT_B.stat().st_size != 375_042_383:
         return False, "SAM ViT-B base checkpoint is missing"
@@ -56,7 +60,9 @@ def load_model():
     available, reason = availability()
     if not available:
         raise FileNotFoundError(reason)
-    _check_sha(CITYSCALE, CITYSCALE_SHA256)
+    use_slim = CITYSCALE_INFERENCE.is_file() and CITYSCALE_INFERENCE.stat().st_size == 351_352_571
+    weights_path = CITYSCALE_INFERENCE if use_slim else CITYSCALE
+    _check_sha(weights_path, CITYSCALE_INFERENCE_SHA256 if use_slim else CITYSCALE_SHA256)
     _check_sha(SAM_VIT_B, SAM_VIT_B_SHA256)
 
     import torch
@@ -71,8 +77,8 @@ def load_model():
     config = SimpleNamespace(**settings)
     with contextlib.redirect_stdout(io.StringIO()):
         net = SAMRoad(config)
-    checkpoint = torch.load(CITYSCALE, map_location="cpu", weights_only=True)
-    net.load_state_dict(checkpoint["state_dict"], strict=True)
+    checkpoint = torch.load(weights_path, map_location="cpu", weights_only=True)
+    net.load_state_dict(checkpoint if use_slim else checkpoint["state_dict"], strict=True)
     del checkpoint
     net.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
