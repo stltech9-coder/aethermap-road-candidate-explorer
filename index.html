@@ -424,6 +424,8 @@
                 </div>
                 <button class="btn btn-primary" id="btn-road-model" disabled>🛣️ Find Roads in Imagery (Local)</button>
                 <p id="road-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking local road model…</p>
+                <button class="btn btn-secondary" id="btn-samroad-model" disabled>🕸️ Trace SAM-Road Graph (Local)</button>
+                <p id="samroad-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking SAM-Road graph model…</p>
                 <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click Feature for SAM Trace (Local)</button>
                 <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Show Mapped Roads Over Imagery (Local)</button>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
@@ -581,6 +583,7 @@
                 this.initSliders();
                 this.checkSamBackend();
                 this.checkRoadBackend();
+                this.checkSamRoadBackend();
             }
 
             initMap() {
@@ -696,6 +699,7 @@
                 document.getElementById('btn-sam-point').addEventListener('click', () => this.togglePromptMode());
                 document.getElementById('btn-mapped-roads').addEventListener('click', () => this.showMappedRoads());
                 document.getElementById('btn-road-model').addEventListener('click', () => this.findRoadsInImagery());
+                document.getElementById('btn-samroad-model').addEventListener('click', () => this.findRoadsInImagery('samroad'));
                 document.getElementById('feature-type').addEventListener('change', () => this.setFeatureType());
                 document.getElementById('btn-trace').addEventListener('click', () => this.toggleTrace());
                 document.getElementById('btn-undo-point').addEventListener('click', () => this.undoTracePoint());
@@ -854,6 +858,21 @@
                 }
             }
 
+            async checkSamRoadBackend() {
+                const status = document.getElementById('samroad-model-status');
+                try {
+                    const response = await fetch('/api/samroad-status', { cache: 'no-store' });
+                    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
+                    const info = await response.json();
+                    if (!info.available) throw new Error(info.reason || 'Model unavailable');
+                    document.getElementById('btn-samroad-model').disabled = this.featureType !== 'road';
+                    status.textContent = 'Original SAM-Road CityScale graph model ready. Purple graph lines need review.';
+                } catch (error) {
+                    document.getElementById('btn-samroad-model').disabled = true;
+                    status.textContent = error.message === 'No local backend' ? 'SAM-Road requires the local launcher.' : `SAM-Road unavailable: ${error.message}`;
+                }
+            }
+
             setFeatureType() {
                 if (this.traceMode) this.toggleTrace();
                 if (this.promptMode) this.togglePromptMode();
@@ -867,6 +886,7 @@
                 document.getElementById('snap-osm').disabled = building;
                 document.getElementById('btn-mapped-roads').disabled = building || document.getElementById('btn-osm').disabled;
                 document.getElementById('btn-road-model').disabled = building || !document.getElementById('road-model-status').textContent.startsWith('Road-specific model');
+                document.getElementById('btn-samroad-model').disabled = building || !document.getElementById('samroad-model-status').textContent.startsWith('Original SAM-Road');
                 this.mappedRoadCandidates = [];
                 this.mappedRoadLayer.clearLayers();
                 this.modelRoadCandidates = [];
@@ -1067,13 +1087,13 @@
                 document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
             }
 
-            async findRoadsInImagery() {
+            async findRoadsInImagery(model = 'bah') {
                 if (this.featureType !== 'road') return;
                 if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
                     this.setMode('error', 'Wait for USGS aerial imagery to appear before detecting roads');
                     return;
                 }
-                const button = document.getElementById('btn-road-model');
+                const button = document.getElementById(model === 'samroad' ? 'btn-samroad-model' : 'btn-road-model');
                 button.disabled = true;
                 this.modelRoadCandidates = [];
                 this.modelRoadLayer.clearLayers();
@@ -1088,7 +1108,7 @@
                     const form = new FormData();
                     form.append('image', image, 'naip.png');
                     form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
-                    const response = await fetch('/api/road-detect', { method: 'POST', body: form });
+                    const response = await fetch(model === 'samroad' ? '/api/samroad-detect' : '/api/road-detect', { method: 'POST', body: form });
                     if (!response.ok || !response.body) {
                         const detail = await response.json().catch(() => ({}));
                         throw new Error(detail.error || `HTTP ${response.status}`);
@@ -1102,12 +1122,13 @@
                         if (message.type === 'error') throw new Error(message.message);
                         if (message.type === 'status') this.setMode('detecting', message.message);
                         if (message.type === 'line') {
-                            this.modelRoadCandidates.push({ coordinates: message.coordinates, confidence: message.confidence });
+                            this.modelRoadCandidates.push({ coordinates: message.coordinates, confidence: message.confidence,
+                                source: model === 'samroad' ? 'usgs_naip_sam_road_cityscale_graph' : 'usgs_naip_road_segmentation_BAH' });
                             this.drawModelRoads();
                             this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
                             this.setMode('detecting', `${this.modelRoadCandidates.length} image-derived road centerlines displayed…`);
                         }
-                        if (message.type === 'done') this.setMode('ready', `${this.modelRoadCandidates.length} road centerline proposals from the aerial image. Select a purple line to review it.`);
+                        if (message.type === 'done') this.setMode('ready', `${this.modelRoadCandidates.length} ${model === 'samroad' ? 'SAM-Road graph paths' : 'road centerline proposals'} from the aerial image. Select a purple line to review it.`);
                     };
                     while (true) {
                         const { done, value } = await reader.read();
@@ -1142,7 +1163,7 @@
                 const road = this.modelRoadCandidates[index];
                 if (!road) return;
                 document.getElementById('feature-props').innerHTML = `
-                    <h4>Image road proposal #${index + 1}</h4>
+                    <h4>${road.source.includes('sam_road') ? 'SAM-Road graph' : 'Image road'} proposal #${index + 1}</h4>
                     <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${this.calculateGeoLength(road.coordinates)} m</span></div>
                     <div class="prop-row"><span class="prop-key">Model score</span><span class="prop-value">${road.confidence}</span></div>
                     <p style="font-size:11px;line-height:1.4;">Predicted from USGS NAIP pixels. Check alignment and gaps before keeping it.</p>
@@ -1154,7 +1175,7 @@
                 const road = this.modelRoadCandidates[index];
                 if (!road) return;
                 this.allRoads.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: road.coordinates }, properties: {
-                    id: `road_model_${Date.now()}_${index}`, feature_type: 'road', source: 'usgs_naip_road_segmentation_BAH',
+                    id: `road_model_${Date.now()}_${index}`, feature_type: 'road', source: road.source,
                     review_status: 'visually_kept_unverified', model_score: road.confidence,
                     length_m: this.calculateGeoLength(road.coordinates), detected_at: new Date().toISOString()
                 }});

@@ -2,10 +2,13 @@
 .env.*
 *.pth
 *.pt
+*.ckpt
 *.onnx
 *.tif
 *.tiff
 *.jp2
 node_modules/
 __pycache__/
+samroadplus-main/
+samroadplus-main.zip
 .DS_Store

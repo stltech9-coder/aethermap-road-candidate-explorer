@@ -23,6 +23,7 @@ app = Flask(__name__, static_folder=None)
 LOCAL_PORT = int(os.environ.get("AETHERMAP_PORT", "8767"))
 model_lock = threading.Lock()
 road_lock = threading.Lock()
+samroad_lock = threading.Lock()
 mask_generator = None
 
 
@@ -221,6 +222,14 @@ def road_status():
         return jsonify(available=False, reason=f"Missing Python package: {exc.name}"), 503
 
 
+@app.get("/api/samroad-status")
+def samroad_status():
+    from samroad_model import availability
+
+    available, reason = availability()
+    return jsonify(available=available, reason=reason, model="SAM-Road CityScale ViT-B", device="CUDA if available, otherwise CPU")
+
+
 @app.get("/api/osm-roads")
 def osm_roads():
     """Small-area reference geometry; this endpoint never edits OSM."""
@@ -417,6 +426,51 @@ def road_detect():
             yield event("error", message=f"Road detection failed: {exc}")
         finally:
             road_lock.release()
+
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/samroad-detect")
+def samroad_detect():
+    """Return topology-head road graph paths predicted from the submitted NAIP image."""
+    from PIL import Image
+
+    origin = request.headers.get("Origin")
+    if origin and origin != f"http://127.0.0.1:{LOCAL_PORT}":
+        return jsonify(error="This local model only accepts requests from its own page"), 403
+    if request.content_length and request.content_length > 8_000_000:
+        return jsonify(error="Image upload is too large"), 413
+    try:
+        bbox = [float(v) for v in json.loads(request.form["bbox3857"])]
+        if len(bbox) != 4 or not all(math.isfinite(v) for v in bbox) or bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+            raise ValueError("Invalid bounding box")
+        Image.MAX_IMAGE_PIXELS = 2_000_000
+        image = Image.open(io.BytesIO(request.files["image"].read())).convert("RGB")
+        if image.width != image.height or image.width not in {512, 1024}:
+            raise ValueError("Expected a 512 or 1024 pixel square image")
+    except (KeyError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify(error=str(exc)), 400
+
+    def generate():
+        if not samroad_lock.acquire(blocking=False):
+            yield event("error", message="Another SAM-Road scan is already running")
+            return
+        try:
+            from samroad_model import graph_paths, predict_road_graph
+
+            yield event("status", message="Loading verified SAM-Road CityScale graph model…")
+            _, edges = predict_road_graph(image)
+            yield event("status", message="Connecting predicted road graph edges…")
+            paths = graph_paths(edges)
+            for path, score in paths[:200]:
+                coordinates = pixel_to_lonlat(path, bbox, image.width, image.height)
+                yield event("line", coordinates=coordinates, confidence=round(score, 3))
+            yield event("done", lines=min(len(paths), 200), graph_edges=len(edges), model="SAM-Road CityScale ViT-B")
+        except Exception as exc:
+            app.logger.exception("SAM-Road detection failed")
+            yield event("error", message=f"SAM-Road detection failed: {exc}")
+        finally:
+            samroad_lock.release()
 
     return Response(stream_with_context(generate()), mimetype="application/x-ndjson", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
