@@ -13,6 +13,7 @@ import os
 import threading
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from queue import Queue
 
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
@@ -455,22 +456,34 @@ def samroad_detect():
         if not samroad_lock.acquire(blocking=False):
             yield event("error", message="Another SAM-Road scan is already running")
             return
-        try:
-            from samroad_model import graph_paths, predict_road_graph
+        messages = Queue()
 
-            yield event("status", message="Loading verified SAM-Road CityScale graph model…")
-            _, edges = predict_road_graph(image)
-            yield event("status", message="Connecting predicted road graph edges…")
-            paths = graph_paths(edges)
-            for path, score in paths[:200]:
-                coordinates = pixel_to_lonlat(path, bbox, image.width, image.height)
-                yield event("line", coordinates=coordinates, confidence=round(score, 3))
-            yield event("done", lines=min(len(paths), 200), graph_edges=len(edges), model="SAM-Road CityScale ViT-B")
-        except Exception as exc:
-            app.logger.exception("SAM-Road detection failed")
-            yield event("error", message=f"SAM-Road detection failed: {exc}")
-        finally:
-            samroad_lock.release()
+        def run_model():
+            try:
+                from samroad_model import graph_paths, predict_road_graph
+
+                messages.put(event("status", message="Loading verified SAM-Road CityScale graph model…"))
+                _, edges = predict_road_graph(image, progress=lambda phase, current, total:
+                    messages.put(event("progress", phase=phase, current=current, total=total)))
+                messages.put(event("status", message="Connecting predicted road graph edges…"))
+                paths = graph_paths(edges)
+                for path, score in paths[:200]:
+                    coordinates = pixel_to_lonlat(path, bbox, image.width, image.height)
+                    messages.put(event("line", coordinates=coordinates, confidence=round(score, 3)))
+                messages.put(event("done", lines=min(len(paths), 200), graph_edges=len(edges), model="SAM-Road CityScale ViT-B"))
+            except Exception as exc:
+                app.logger.exception("SAM-Road detection failed")
+                messages.put(event("error", message=f"SAM-Road detection failed: {exc}"))
+            finally:
+                samroad_lock.release()
+                messages.put(None)
+
+        threading.Thread(target=run_model, daemon=True).start()
+        while True:
+            message = messages.get()
+            if message is None:
+                break
+            yield message
 
     return Response(stream_with_context(generate()), mimetype="application/x-ndjson", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 

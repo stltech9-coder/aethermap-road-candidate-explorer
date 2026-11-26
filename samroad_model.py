@@ -130,7 +130,7 @@ def _tile_starts(size, patch_size):
     return list(range(0, size - patch_size, patch_size // 2)) + [size - patch_size]
 
 
-def predict_road_graph(image):
+def predict_road_graph(image, progress=None):
     """Return mask and image-pixel graph edges for a 512/1024 square PIL image."""
     import numpy as np
     import torch
@@ -142,11 +142,13 @@ def predict_road_graph(image):
     if width != height or width not in (512, 1024):
         raise ValueError("SAM-Road expects a 512 or 1024 pixel square image")
     starts = _tile_starts(width, config.PATCH_SIZE)
+    tile_total = len(starts) ** 2
     fused = np.zeros((height, width, 2), dtype=np.float32)
     counts = np.zeros((height, width), dtype=np.float32)
     tiles = []
 
     with torch.inference_mode():
+        mask_done = 0
         for y in starts:
             for x in starts:
                 patch = torch.from_numpy(pixels[y:y + 512, x:x + 512].copy()).unsqueeze(0).to(device)
@@ -154,15 +156,20 @@ def predict_road_graph(image):
                 fused[y:y + 512, x:x + 512] += scores[0].cpu().numpy()
                 counts[y:y + 512, x:x + 512] += 1
                 tiles.append((x, y, features))
+                mask_done += 1
+                if progress:
+                    progress("mask", mask_done, tile_total)
         fused /= counts[..., None]
         points = _graph_points(fused[..., 0], fused[..., 1], config)
         if len(points) > 3000:
             points = points[:3000]
         edge_scores = defaultdict(list)
-        for x, y, features in tiles:
+        for graph_done, (x, y, features) in enumerate(tiles, 1):
             eligible = np.where((points[:, 0] >= x) & (points[:, 0] < x + 512) &
                                 (points[:, 1] >= y) & (points[:, 1] < y + 512))[0]
             if len(eligible) < 2:
+                if progress:
+                    progress("graph", graph_done, tile_total)
                 continue
             local = points[eligible] - np.array([x, y])
             distances, neighbors = cKDTree(local).query(local, k=min(17, len(local)),
@@ -187,6 +194,8 @@ def predict_road_graph(image):
             for i, j in np.argwhere(valid):
                 edge = tuple(sorted((int(eligible[i]), int(eligible[pairs[i, j, 1]]))))
                 edge_scores[edge].append(float(scores[i, j]))
+            if progress:
+                progress("graph", graph_done, tile_total)
     del tiles
     edges = [(points[i].tolist(), points[j].tolist(), float(np.mean(values)))
              for (i, j), values in edge_scores.items()

@@ -196,6 +196,12 @@
 
         .processing-overlay.active { display: flex; }
 
+        .scan-progress { display: none; margin: 10px 0 14px; padding: 11px; border: 1px solid #464061; border-radius: 8px; background: #1b1a29; }
+        .scan-progress.active { display: block; }
+        .scan-progress-label { color: #e8ddff; font-size: 12px; margin-bottom: 8px; line-height: 1.4; }
+        .scan-progress progress { width: 100%; height: 12px; accent-color: #8b5cf6; }
+        .scan-progress small { display: block; color: #aaa7bf; margin-top: 5px; }
+
         .processing-spinner {
             width: 60px;
             height: 60px;
@@ -422,12 +428,20 @@
                     <label for="feature-type">Feature to trace</label>
                     <select id="feature-type"><option value="road">Road centerline</option><option value="building">Building footprint</option><option value="tree" disabled>Tree canopy (future)</option></select>
                 </div>
-                <button class="btn btn-primary" id="btn-road-model" disabled>🛣️ Find Roads in Imagery (Local)</button>
-                <p id="road-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking local road model…</p>
-                <button class="btn btn-secondary" id="btn-samroad-model" disabled>🕸️ Trace SAM-Road Graph (Local)</button>
+                <button class="btn btn-primary" id="btn-samroad-model" disabled>🕸️ Trace Roads with SAM-Road (Local)</button>
                 <p id="samroad-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking SAM-Road graph model…</p>
-                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click Feature for SAM Trace (Local)</button>
-                <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Show Mapped Roads Over Imagery (Local)</button>
+                <button class="btn btn-secondary" id="btn-road-model" disabled>⚡ Quick Road Preview (Lower Detail)</button>
+                <p id="road-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking quick road model…</p>
+                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.</p>
+                <div class="scan-progress" id="scan-progress" role="status" aria-live="polite">
+                    <div class="scan-progress-label" id="scan-progress-label">Preparing imagery…</div>
+                    <progress id="scan-progress-bar" max="100"></progress>
+                    <small id="scan-progress-detail">Results appear on the map as they arrive.</small>
+                </div>
+                <p id="autosave-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">Reviewed features and road proposals are saved in this browser.</p>
+                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Feature for SAM Suggestion</button>
+                <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Compare with OSM Map Roads</button>
+                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">The click tool suggests a shape from imagery. OSM roads are existing map data for comparison, not image detections.</p>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
                 <p id="trace-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
@@ -435,7 +449,7 @@
                     <button class="btn btn-secondary" id="btn-undo-point" disabled>↶ Undo Point</button>
                     <button class="btn btn-primary" id="btn-finish-trace" disabled>✓ Save Trace</button>
                 </div>
-                <button class="btn btn-secondary" id="btn-osm" disabled>Load OSM Road Reference</button>
+                <button class="btn btn-secondary" id="btn-osm" disabled>Load OSM Snapping Reference</button>
                 <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby OSM roads</label>
                 <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">OSM reference requires the local launcher.</p>
                 <details style="margin-top:12px;color:#aeb3c5;font-size:11px;"><summary>Generic image-line diagnostics (not feature classified)</summary>
@@ -570,6 +584,8 @@
                 this.promptCandidate = null;
                 this.mappedRoadCandidates = [];
                 this.modelRoadCandidates = [];
+                this.scanBusy = false;
+                this.storageKey = 'aethermap-work-v1';
 
                 this.captureCanvas = document.getElementById('capture-canvas');
                 this.processCanvas = document.getElementById('process-canvas');
@@ -579,6 +595,7 @@
                 this.previewCtx = this.previewCanvas.getContext('2d', { willReadFrequently: true });
 
                 this.initMap();
+                this.restoreWork();
                 this.initEventListeners();
                 this.initSliders();
                 this.checkSamBackend();
@@ -623,8 +640,9 @@
                     document.getElementById('center-lat').value = e.latlng.lat.toFixed(6);
                     document.getElementById('center-lon').value = e.latlng.lng.toFixed(6);
                     this.updateDetectionArea();
+                    this.saveWork();
                 });
-                this.map.on('moveend', () => this.loadVisibleImagery());
+                this.map.on('moveend', () => { this.loadVisibleImagery(); this.saveWork(); });
                 this.map.on('zoomend', () => this.updateDetectionArea());
 
                 this.updateDetectionArea();
@@ -715,10 +733,11 @@
                         if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
                             this.map.panTo([lat, lon]);
                             this.updateDetectionArea();
+                            this.saveWork();
                         }
                     });
                 });
-                document.getElementById('capture-size').addEventListener('change', () => this.updateDetectionArea());
+                document.getElementById('capture-size').addEventListener('change', () => { this.updateDetectionArea(); this.saveWork(); });
 
                 document.getElementById('export-geojson').addEventListener('click', () => this.exportLayer('geojson'));
                 document.getElementById('export-kml').addEventListener('click', () => this.exportLayer('kml'));
@@ -760,6 +779,64 @@
             setMode(mode, detail = '') {
                 document.getElementById('mode-dot').classList.toggle('active', mode !== 'ready');
                 document.getElementById('mode-text').textContent = detail || mode;
+            }
+
+            restoreWork() {
+                try {
+                    const saved = JSON.parse(localStorage.getItem(this.storageKey) || 'null');
+                    if (!saved || saved.version !== 1) return;
+                    if (!Array.isArray(saved.features) || !Array.isArray(saved.proposals)) throw new Error('Invalid saved work');
+                    this.allRoads = saved.features.filter(feature => feature?.type === 'Feature' &&
+                        ['LineString', 'Polygon'].includes(feature.geometry?.type) && feature.properties);
+                    this.modelRoadCandidates = saved.proposals.filter(road =>
+                        Array.isArray(road.coordinates) && road.coordinates.length > 1 && road.source);
+                    if (saved.view && Array.isArray(saved.view.center) && Number.isFinite(saved.view.zoom))
+                        this.map.setView(saved.view.center, saved.view.zoom);
+                    if ([512, 1024].includes(Number(saved.captureSize)))
+                        document.getElementById('capture-size').value = String(saved.captureSize);
+                    if (Array.isArray(saved.detectionCenter) && saved.detectionCenter.every(Number.isFinite)) {
+                        document.getElementById('center-lat').value = saved.detectionCenter[0].toFixed(6);
+                        document.getElementById('center-lon').value = saved.detectionCenter[1].toFixed(6);
+                    }
+                    this.updateDetectionArea();
+                    this.redrawAllRoads();
+                    this.drawModelRoads();
+                    this.updateLayerCount();
+                    this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
+                    document.getElementById('autosave-status').textContent =
+                        `Restored ${this.allRoads.length} reviewed features and ${this.modelRoadCandidates.length} road proposals from this browser.`;
+                } catch (error) {
+                    document.getElementById('autosave-status').textContent =
+                        'Saved work could not be read. Export current work before clearing browser data.';
+                    console.error('Could not restore AetherMap work', error);
+                }
+            }
+
+            saveWork() {
+                try {
+                    localStorage.setItem(this.storageKey, JSON.stringify({
+                        version: 1, savedAt: new Date().toISOString(), features: this.allRoads,
+                        proposals: this.modelRoadCandidates,
+                        view: { center: [this.map.getCenter().lat, this.map.getCenter().lng], zoom: this.map.getZoom() },
+                        captureSize: Number(document.getElementById('capture-size').value),
+                        detectionCenter: [Number(document.getElementById('center-lat').value), Number(document.getElementById('center-lon').value)]
+                    }));
+                    document.getElementById('autosave-status').textContent =
+                        `Saved in this browser: ${this.allRoads.length} reviewed features, ${this.modelRoadCandidates.length} road proposals.`;
+                } catch (error) {
+                    document.getElementById('autosave-status').textContent =
+                        'Browser storage is full or unavailable. Export GeoJSON to protect reviewed work.';
+                    console.error('Could not save AetherMap work', error);
+                }
+            }
+
+            scanProgress(label, percent = null, detail = 'Results appear on the map as they arrive.') {
+                document.getElementById('scan-progress').classList.add('active');
+                document.getElementById('scan-progress-label').textContent = label;
+                document.getElementById('scan-progress-detail').textContent = detail;
+                const bar = document.getElementById('scan-progress-bar');
+                if (percent === null) bar.removeAttribute('value');
+                else bar.value = Math.max(0, Math.min(100, percent));
             }
 
             showProcessing(show, text = 'Processing...', detail = '') {
@@ -850,8 +927,8 @@
                     if (!info.available) throw new Error(info.reason || 'Model unavailable');
                     document.getElementById('btn-road-model').disabled = this.featureType !== 'road';
                     status.textContent = info.checkpoint_cached
-                        ? 'Road-specific model ready on CPU. Each image-derived centerline needs review.'
-                        : 'Road-specific model available. First run downloads its 57 MB checkpoint; each centerline needs review.';
+                        ? 'Road-specific quick model ready on CPU. Dashed amber proposals need review.'
+                        : 'Road-specific model available. First run downloads its 57 MB checkpoint; dashed amber proposals need review.';
                 } catch (error) {
                     document.getElementById('btn-road-model').disabled = true;
                     status.textContent = 'Automatic road detection requires the local launcher.';
@@ -866,7 +943,7 @@
                     const info = await response.json();
                     if (!info.available) throw new Error(info.reason || 'Model unavailable');
                     document.getElementById('btn-samroad-model').disabled = this.featureType !== 'road';
-                    status.textContent = 'Original SAM-Road CityScale graph model ready. Purple graph lines need review.';
+                    status.textContent = 'Original SAM-Road CityScale graph model ready. Solid purple lines need review.';
                 } catch (error) {
                     document.getElementById('btn-samroad-model').disabled = true;
                     status.textContent = error.message === 'No local backend' ? 'SAM-Road requires the local launcher.' : `SAM-Road unavailable: ${error.message}`;
@@ -885,12 +962,12 @@
                     : 'Click along the road center. Drag yellow points to correct the line, then save it.';
                 document.getElementById('snap-osm').disabled = building;
                 document.getElementById('btn-mapped-roads').disabled = building || document.getElementById('btn-osm').disabled;
-                document.getElementById('btn-road-model').disabled = building || !document.getElementById('road-model-status').textContent.startsWith('Road-specific model');
+                document.getElementById('btn-road-model').disabled = building || !document.getElementById('road-model-status').textContent.startsWith('Road-specific');
                 document.getElementById('btn-samroad-model').disabled = building || !document.getElementById('samroad-model-status').textContent.startsWith('Original SAM-Road');
                 this.mappedRoadCandidates = [];
                 this.mappedRoadLayer.clearLayers();
-                this.modelRoadCandidates = [];
-                this.modelRoadLayer.clearLayers();
+                if (building) this.map.removeLayer(this.modelRoadLayer);
+                else this.map.addLayer(this.modelRoadLayer);
                 this.setMode('ready', `Selected ${building ? 'building footprint' : 'road centerline'} tracing`);
             }
 
@@ -898,7 +975,7 @@
                 if (this.promptMode) {
                     this.promptMode = false;
                     document.body.classList.remove('trace-active');
-                    document.getElementById('btn-sam-point').textContent = '🧠 Click Feature for SAM Trace (Local)';
+                    document.getElementById('btn-sam-point').textContent = '🧠 Click One Feature for SAM Suggestion';
                     this.setMode('ready', 'SAM selection cancelled');
                     return;
                 }
@@ -979,6 +1056,7 @@
                 this.rejectPromptCandidate();
                 this.redrawAllRoads();
                 this.updateLayerCount();
+                this.saveWork();
                 this.setMode('ready', `Saved visually reviewed ${p.feature_type} suggestion`);
             }
 
@@ -1077,6 +1155,7 @@
                 this.rejectMappedRoad(index);
                 this.redrawAllRoads();
                 this.updateLayerCount();
+                this.saveWork();
                 this.setMode('ready', 'Saved reviewed OSM road; edit geometry if it does not follow the aerial image');
             }
 
@@ -1089,20 +1168,31 @@
 
             async findRoadsInImagery(model = 'bah') {
                 if (this.featureType !== 'road') return;
+                if (this.scanBusy) return;
                 if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
                     this.setMode('error', 'Wait for USGS aerial imagery to appear before detecting roads');
                     return;
                 }
                 const button = document.getElementById(model === 'samroad' ? 'btn-samroad-model' : 'btn-road-model');
-                button.disabled = true;
-                this.modelRoadCandidates = [];
-                this.modelRoadLayer.clearLayers();
+                this.scanBusy = true;
+                document.getElementById('btn-samroad-model').disabled = true;
+                document.getElementById('btn-road-model').disabled = true;
+                this.scanProgress('Downloading aerial imagery…', null, 'Capturing the selected area.');
                 this.setMode('detecting', 'Capturing aerial imagery for road detection…');
                 try {
                     await this.captureMapArea();
+                    this.scanProgress(model === 'samroad' ? 'Loading SAM-Road graph model…' : 'Loading quick road model…',
+                        null, 'The first model load can take longer.');
                     const image = await new Promise((resolve, reject) =>
                         this.captureCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode image')), 'image/png'));
                     const b = this.captureBounds;
+                    const scanKey = `${model}:${[b.minLat, b.minLon, b.maxLat, b.maxLon].map(value => value.toFixed(5)).join(':')}`;
+                    const previous = this.modelRoadCandidates.filter(road => road.scanKey === scanKey).length;
+                    if (previous) {
+                        this.scanProgress('Using saved road proposals', 100, `${previous} proposals already exist for this area.`);
+                        this.setMode('ready', `${previous} saved proposals for this area. Select a purple line to review it.`);
+                        return;
+                    }
                     const sw = L.CRS.EPSG3857.project(L.latLng(b.minLat, b.minLon));
                     const ne = L.CRS.EPSG3857.project(L.latLng(b.maxLat, b.maxLon));
                     const form = new FormData();
@@ -1116,19 +1206,35 @@
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let pending = '';
+                    let newCount = 0;
                     const handle = line => {
                         if (!line.trim()) return;
                         const message = JSON.parse(line);
                         if (message.type === 'error') throw new Error(message.message);
-                        if (message.type === 'status') this.setMode('detecting', message.message);
+                        if (message.type === 'status') {
+                            this.scanProgress(message.message, null);
+                            this.setMode('detecting', message.message);
+                        }
+                        if (message.type === 'progress') {
+                            const mask = message.phase === 'mask';
+                            const percent = mask ? Math.round(message.current / message.total * 50)
+                                : 50 + Math.round(message.current / message.total * 40);
+                            this.scanProgress(mask ? 'Finding road pixels…' : 'Connecting road graph…', percent,
+                                `${message.current} of ${message.total} ${mask ? 'image' : 'graph'} tiles processed.`);
+                        }
                         if (message.type === 'line') {
                             this.modelRoadCandidates.push({ coordinates: message.coordinates, confidence: message.confidence,
-                                source: model === 'samroad' ? 'usgs_naip_sam_road_cityscale_graph' : 'usgs_naip_road_segmentation_BAH' });
+                                source: model === 'samroad' ? 'usgs_naip_sam_road_cityscale_graph' : 'usgs_naip_road_segmentation_BAH', scanKey });
+                            newCount++;
                             this.drawModelRoads();
                             this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
-                            this.setMode('detecting', `${this.modelRoadCandidates.length} image-derived road centerlines displayed…`);
+                            this.saveWork();
+                            this.setMode('detecting', `${newCount} new road proposals displayed…`);
                         }
-                        if (message.type === 'done') this.setMode('ready', `${this.modelRoadCandidates.length} ${model === 'samroad' ? 'SAM-Road graph paths' : 'road centerline proposals'} from the aerial image. Select a purple line to review it.`);
+                        if (message.type === 'done') {
+                            this.scanProgress('Road scan complete', 100, `${newCount} new proposals. Select purple lines to keep or reject.`);
+                            this.setMode('ready', `${newCount} new ${model === 'samroad' ? 'SAM-Road graph paths' : 'quick road previews'} from aerial imagery. Select a purple line to review it.`);
+                        }
                     };
                     while (true) {
                         const { done, value } = await reader.read();
@@ -1142,17 +1248,25 @@
                     }
                     if (pending.trim()) handle(pending);
                 } catch (error) {
+                    this.scanProgress('Road scan stopped', null, error.message);
                     this.setMode('error', error.message);
                 } finally {
+                    this.scanBusy = false;
                     button.disabled = this.featureType !== 'road';
+                    document.getElementById('btn-samroad-model').disabled = this.featureType !== 'road' ||
+                        !document.getElementById('samroad-model-status').textContent.startsWith('Original SAM-Road');
+                    document.getElementById('btn-road-model').disabled = this.featureType !== 'road' ||
+                        !document.getElementById('road-model-status').textContent.startsWith('Road-specific');
                 }
             }
 
             drawModelRoads() {
                 this.modelRoadLayer.clearLayers();
                 this.modelRoadCandidates.forEach((road, index) => {
+                    const graph = road.source.includes('sam_road');
                     const shape = L.polyline(road.coordinates.map(([lon, lat]) => [lat, lon]), {
-                        color: '#dd6bff', weight: 4, opacity: 0.9, bubblingMouseEvents: false
+                        color: graph ? '#dd6bff' : '#ffb454', weight: graph ? 4 : 3,
+                        dashArray: graph ? null : '7, 5', opacity: 0.95, bubblingMouseEvents: false
                     });
                     shape.on('click', () => this.showModelRoadCandidate(index));
                     shape.addTo(this.modelRoadLayer);
@@ -1163,7 +1277,7 @@
                 const road = this.modelRoadCandidates[index];
                 if (!road) return;
                 document.getElementById('feature-props').innerHTML = `
-                    <h4>${road.source.includes('sam_road') ? 'SAM-Road graph' : 'Image road'} proposal #${index + 1}</h4>
+                    <h4>${road.source.includes('sam_road') ? 'SAM-Road graph' : 'Quick road preview'} proposal #${index + 1}</h4>
                     <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${this.calculateGeoLength(road.coordinates)} m</span></div>
                     <div class="prop-row"><span class="prop-key">Model score</span><span class="prop-value">${road.confidence}</span></div>
                     <p style="font-size:11px;line-height:1.4;">Predicted from USGS NAIP pixels. Check alignment and gaps before keeping it.</p>
@@ -1190,6 +1304,7 @@
                 this.modelRoadCandidates.splice(index, 1);
                 this.drawModelRoads();
                 this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
+                this.saveWork();
                 document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
             }
 
@@ -1318,6 +1433,7 @@
                 this.redrawAllRoads();
                 if (this.vectorizedRoads.length) this.displayVectorizedRoads(this.vectorizedRoads);
                 this.updateLayerCount();
+                this.saveWork();
                 this.setMode('ready', edited ? `Saved corrected ${building ? 'building footprint' : 'road centerline'}` : `Saved ${building ? 'building footprint' : 'road centerline'} to export layer`);
             }
 
@@ -1342,6 +1458,7 @@
                 this.redrawAllRoads();
                 if (this.vectorizedRoads.length) this.displayVectorizedRoads(this.vectorizedRoads);
                 this.updateLayerCount();
+                this.saveWork();
                 document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
                 this.setMode('ready', 'Removed line from export layer');
             }
@@ -1878,6 +1995,7 @@
                 });
                 this.rejectCandidate(index);
                 this.updateLayerCount();
+                this.saveWork();
                 this.setMode('ready', 'Kept proposal in export layer; geometry still needs validation');
             }
 
@@ -1901,6 +2019,7 @@
                 this.modelRoadLayer.clearLayers();
                 this.rejectPromptCandidate();
                 this.updateLayerCount();
+                this.saveWork();
                 this.setMode('ready', 'All saved features cleared');
                 document.getElementById('stat-roads').textContent = '0';
                 document.getElementById('stat-length').innerHTML = '0<span class="stat-unit">m</span>';

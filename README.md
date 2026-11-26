@@ -7,11 +7,12 @@ A prototype for tracing visible roads and building footprints from aerial imager
 Double-click `start-local-sam.bat` and open `http://127.0.0.1:8767/`. Port **8767** keeps this app separate from the other local service on 8766. The launcher uses the installed QGIS 3.44.1 Python runtime. The service binds only to `127.0.0.1`.
 
 1. Pan and zoom to a contiguous U.S. location. The map and analysis image use [USGS NAIP aerial imagery](https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer).
-2. Select **Road centerline**, then **Find Roads in Imagery (Local)**. Purple lines are road-specific model predictions from the aerial image. Click each line to keep or reject it. Select a kept line to edit its vertices.
-   On this machine, **Trace SAM-Road Graph (Local)** runs the original SAM-Road CityScale model and its topology head as a second road-only option. Its purple graph paths also require review.
+2. Select **Road centerline**, then **Trace Roads with SAM-Road (Local)**. Its road graph is predicted from aerial imagery. Solid purple proposals appear as the image and graph tiles finish; click each line to keep or reject it. **Quick Road Preview (Lower Detail)** runs a smaller 256-pixel segmentation model and shows dashed amber proposals. Select a kept line to edit its vertices.
 3. For a roof, select **Building footprint**. Trace its boundary on the map, or click it with the local SAM prompt tool. The SAM result needs visual review because SAM itself has no road/building class label.
 4. The separate red **Show Mapped Roads Over Imagery** action displays OpenStreetMap centerlines as reference proposals. These come from map data, not image detection. A blue OSM reference layer can also be loaded for manual snapping.
 5. Export reviewed features to GeoJSON, KML, WKT, or OSM XML. Exports retain source and review status. OSM XML does not assign a `highway` tag to model predictions.
+
+Reviewed features and unreviewed road proposals autosave in this browser and reappear after refresh, including when you return to an earlier map area. A scan of the same area and model uses its saved proposals. Browser storage is scoped to the page address and is not a cloud backup; export GeoJSON for a portable copy. The SAM-Road progress panel reports completed image and graph tiles, with an indeterminate bar while the model loads.
 
 The **Generic image-line diagnostics** section holds the older edge and automatic SAM mask scans. Those scans are unclassified and should not be interpreted as road detection.
 
