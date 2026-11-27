@@ -432,6 +432,10 @@
                 <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Road for SAM Suggestion</button>
                 <p id="sam-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Click a road in imagery for a SAM suggestion. Review the result before saving.</p>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
+                <div id="building-model-controls" hidden>
+                    <button class="btn btn-primary" id="btn-building-model" disabled>🏢 Find Buildings in Area (Local)</button>
+                    <p id="building-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking building model…</p>
+                </div>
                 <div id="road-model-controls">
                 <button class="btn btn-primary" id="btn-samroad-model" disabled>🕸️ Find Roads with SAM-Road (Local)</button>
                 <p id="samroad-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking SAM-Road graph model…</p>
@@ -444,7 +448,7 @@
                     <progress id="scan-progress-bar" max="100"></progress>
                     <small id="scan-progress-detail">Results appear on the map as they arrive.</small>
                 </div>
-                <p id="autosave-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">Reviewed features and road proposals are saved in this browser.</p>
+                <p id="autosave-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">Reviewed features and proposals are saved in this browser.</p>
                 <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
                 <p id="trace-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
                 <div class="btn-group">
@@ -510,19 +514,20 @@
         </div>
 
         <div class="results-panel">
-            <div class="section-title">Edge Preview</div>
+            <div class="section-title" id="preview-title">Image / Trace Preview</div>
             <div class="preview-canvas-wrap">
                 <canvas id="preview-canvas"></canvas>
             </div>
+            <p id="preview-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:4px 0 12px;">The captured aerial image and suggested outline appear here after a trace.</p>
 
             <div class="section-title">Statistics</div>
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-label">Line Candidates</div>
+                    <div class="stat-label" id="stat-count-label">Line Candidates</div>
                     <div class="stat-value" id="stat-roads">0</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Total Length</div>
+                    <div class="stat-label" id="stat-measure-label">Total Length</div>
                     <div class="stat-value" id="stat-length">0<span class="stat-unit">m</span></div>
                 </div>
                 <div class="stat-card">
@@ -541,7 +546,7 @@
                     <input type="checkbox" checked onchange="detector.toggleLayerVisibility(this.checked)">
                     <div class="layer-color" style="background: #00ff88;"></div>
                     <div class="layer-info">
-                        <div class="layer-name">Reviewed / Traced Lines</div>
+                        <div class="layer-name">Reviewed / Traced Features</div>
                         <div class="layer-count" id="layer-count">0 features</div>
                     </div>
                     <div style="display:flex; gap:4px;">
@@ -559,7 +564,7 @@
             <div class="section-title">Save and Export Traces</div>
             <p id="export-status" role="status" aria-live="polite" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 9px;">Save Trace or Keep suggestion before exporting reviewed features.</p>
             <button class="btn btn-primary" id="export-all-traces" disabled>⬇️ Export All (GeoJSON)</button>
-            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">All export includes unreviewed road proposals. Check their review status before using them.</p>
+            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">All export includes unreviewed road and building proposals. Check their review status before using them.</p>
             <div class="section-title">Export Reviewed Features Only</div>
             <div class="export-grid">
                 <button class="btn btn-secondary export-btn" id="export-geojson">📄 GeoJSON</button>
@@ -606,6 +611,7 @@
                 this.promptCandidate = null;
                 this.mappedRoadCandidates = [];
                 this.modelRoadCandidates = [];
+                this.buildingCandidates = [];
                 this.scanBusy = false;
                 this.storageKey = 'aethermap-work-v1';
 
@@ -623,6 +629,7 @@
                 this.checkSamBackend();
                 this.checkRoadBackend();
                 this.checkSamRoadBackend();
+                this.checkBuildingBackend();
             }
 
             initMap() {
@@ -640,6 +647,7 @@
                 this.promptLayer = L.layerGroup().addTo(this.map);
                 this.mappedRoadLayer = L.layerGroup().addTo(this.map);
                 this.modelRoadLayer = L.layerGroup().addTo(this.map);
+                this.buildingLayer = L.layerGroup().addTo(this.map);
                 this.map.attributionControl.addAttribution('Road reference: U.S. Census Bureau TIGERweb');
 
                 this.map.on('mousemove', (e) => {
@@ -813,6 +821,7 @@
                 document.getElementById('btn-mapped-roads').addEventListener('click', () => this.showMappedRoads());
                 document.getElementById('btn-road-model').addEventListener('click', () => this.findRoadsInImagery());
                 document.getElementById('btn-samroad-model').addEventListener('click', () => this.findRoadsInImagery('samroad'));
+                document.getElementById('btn-building-model').addEventListener('click', () => this.findBuildingsInImagery());
                 document.getElementById('feature-type').addEventListener('change', () => this.setFeatureType());
                 document.getElementById('map-view').addEventListener('change', event => this.setMapView(event.target.value));
                 document.getElementById('imagery-source').addEventListener('change', event => {
@@ -893,6 +902,8 @@
                         ['LineString', 'Polygon'].includes(feature.geometry?.type) && feature.properties);
                     this.modelRoadCandidates = saved.proposals.filter(road =>
                         Array.isArray(road.coordinates) && road.coordinates.length > 1 && road.source);
+                    this.buildingCandidates = (Array.isArray(saved.buildingProposals) ? saved.buildingProposals : [])
+                        .filter(candidate => candidate.geometry?.type === 'Polygon' && candidate.geometry.coordinates?.[0]?.length > 3);
                     if (['usgs', 'local'].includes(saved.imagerySource)) {
                         this.imagerySource = saved.imagerySource;
                         document.getElementById('imagery-source').value = saved.imagerySource;
@@ -928,12 +939,13 @@
                     this.updateDetectionArea();
                     this.redrawAllRoads();
                     this.drawModelRoads();
+                    this.drawBuildingCandidates();
                     this.updateLayerCount();
                     this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
                     this.loadVisibleImagery();
                     this.setFeatureType();
                     document.getElementById('autosave-status').textContent =
-                        `Restored ${this.allRoads.length} reviewed features and ${this.modelRoadCandidates.length} road proposals from this browser.`;
+                        `Restored ${this.allRoads.length} reviewed features, ${this.modelRoadCandidates.length} road proposals, and ${this.buildingCandidates.length} building proposals from this browser.`;
                 } catch (error) {
                     document.getElementById('autosave-status').textContent =
                         'Saved work could not be read. Export current work before clearing browser data.';
@@ -945,14 +957,14 @@
                 try {
                     localStorage.setItem(this.storageKey, JSON.stringify({
                         version: 1, savedAt: new Date().toISOString(), features: this.allRoads,
-                        proposals: this.modelRoadCandidates,
+                        proposals: this.modelRoadCandidates, buildingProposals: this.buildingCandidates,
                         mapView: this.mapView, imagerySource: this.imagerySource, featureType: this.featureType,
                         view: { center: [this.map.getCenter().lat, this.map.getCenter().lng], zoom: this.map.getZoom() },
                         captureSize: Number(document.getElementById('capture-size').value),
                         detectionCenter: [Number(document.getElementById('center-lat').value), Number(document.getElementById('center-lon').value)]
                     }));
                     document.getElementById('autosave-status').textContent =
-                        `Saved in this browser: ${this.allRoads.length} reviewed features, ${this.modelRoadCandidates.length} road proposals.`;
+                        `Saved in this browser: ${this.allRoads.length} reviewed features, ${this.modelRoadCandidates.length} road proposals, ${this.buildingCandidates.length} building proposals.`;
                 } catch (error) {
                     document.getElementById('autosave-status').textContent =
                         'Browser storage is full or unavailable. Export GeoJSON to protect reviewed work.';
@@ -1105,6 +1117,22 @@
                 }
             }
 
+            async checkBuildingBackend() {
+                const status = document.getElementById('building-model-status');
+                const button = document.getElementById('btn-building-model');
+                try {
+                    const response = await fetch('/api/building-status', { cache: 'no-store' });
+                    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
+                    const info = await response.json();
+                    if (!info.available) throw new Error(info.reason || 'Model unavailable');
+                    button.disabled = this.featureType !== 'building';
+                    status.textContent = 'USA building footprint model ready on CPU. Zoom to 18 or closer; review every suggested roof.';
+                } catch (error) {
+                    button.disabled = true;
+                    status.textContent = error.message === 'No local backend' ? 'Area building detection requires the local launcher.' : `Building model unavailable: ${error.message}`;
+                }
+            }
+
             setFeatureType() {
                 if (this.traceMode) this.toggleTrace();
                 if (this.promptMode) this.togglePromptMode();
@@ -1112,6 +1140,7 @@
                 this.rejectPromptCandidate();
                 const building = this.featureType === 'building';
                 document.getElementById('road-model-controls').hidden = building;
+                document.getElementById('building-model-controls').hidden = !building;
                 document.getElementById('road-reference-controls').hidden = building;
                 document.getElementById('btn-trace').textContent = building ? '✍️ Trace Building on Map' : '✍️ Trace Road on Map';
                 document.getElementById('btn-sam-point').textContent = building ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
@@ -1119,10 +1148,10 @@
                     ? 'Use SAM to suggest one roof footprint or draw it by hand, then review the outline.'
                     : 'SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.';
                 document.getElementById('sam-help').textContent = building
-                    ? 'Click one visible roof in imagery for a SAM footprint suggestion, or trace it by hand. SAM does not classify buildings and an area-wide building model is not connected; inspect each outline before saving.'
+                    ? 'Use Find Buildings in Area for multiple roof proposals, or click one roof for a SAM suggestion. Review each outline before saving.'
                     : 'Click a road in imagery for a SAM suggestion. Census roads are existing map data for comparison.';
-                document.getElementById('btn-samroad-model').textContent = building ? 'Building model unavailable (use SAM below)' : '🕸️ Find Roads with SAM-Road (Local)';
-                document.getElementById('btn-road-model').textContent = building ? 'Quick road preview unavailable for buildings' : '⚡ Quick Road Preview (Lower Detail)';
+                document.getElementById('btn-samroad-model').textContent = '🕸️ Find Roads with SAM-Road (Local)';
+                document.getElementById('btn-road-model').textContent = '⚡ Quick Road Preview (Lower Detail)';
                 document.getElementById('trace-help').textContent = building
                     ? 'Click around the visible roof boundary. Drag orange points to correct the footprint, then save it.'
                     : 'Click along the road center. Drag yellow points to correct the line, then save it.';
@@ -1131,10 +1160,14 @@
                 document.getElementById('btn-mapped-roads').disabled = building || document.getElementById('btn-osm').disabled;
                 document.getElementById('btn-road-model').disabled = building || !document.getElementById('road-model-status').textContent.startsWith('Road-specific');
                 document.getElementById('btn-samroad-model').disabled = building || !document.getElementById('samroad-model-status').textContent.startsWith('Original SAM-Road');
+                document.getElementById('btn-building-model').disabled = !building || !document.getElementById('building-model-status').textContent.startsWith('USA building');
                 this.mappedRoadCandidates = [];
                 this.mappedRoadLayer.clearLayers();
                 if (building) this.map.removeLayer(this.modelRoadLayer);
                 else this.map.addLayer(this.modelRoadLayer);
+                if (building) this.map.addLayer(this.buildingLayer);
+                else this.map.removeLayer(this.buildingLayer);
+                this.updateLayerCount();
                 this.setMode('ready', `Selected ${building ? 'building footprint' : 'road centerline'} tracing`);
                 this.saveWork();
             }
@@ -1209,6 +1242,7 @@
                     this.promptLayer.clearLayers();
                     shape.addTo(this.promptLayer);
                     shape.on('click', () => this.showPromptCandidate());
+                    this.showTracePreview([result.geometry]);
                     this.showPromptCandidate();
                     this.setMode('ready', `SAM suggested a ${selectedType}; inspect the overlay before keeping it`);
                     this.scanProgress('Suggestion ready for review', 100,
@@ -1357,6 +1391,137 @@
                 if (!this.mappedRoadCandidates[index]) return;
                 this.mappedRoadCandidates.splice(index, 1);
                 this.drawMappedRoads();
+                document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
+            }
+
+            async findBuildingsInImagery() {
+                if (this.featureType !== 'building' || this.scanBusy) return;
+                if (this.map.getZoom() < 18) {
+                    this.setMode('error', 'Zoom to level 18 or closer before finding buildings. The model needs detailed roof imagery.');
+                    this.scanProgress('Zoom in for building detection', 0, 'Zoom to 18 or closer, then run Find Buildings in Area.');
+                    return;
+                }
+                if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
+                    this.setMode('error', `Wait for ${this.activeImagerySource()} imagery to appear before finding buildings`);
+                    return;
+                }
+                const button = document.getElementById('btn-building-model');
+                this.scanBusy = true;
+                button.disabled = true;
+                this.scanProgress('Capturing roof imagery…', null, 'Preparing the selected map area.');
+                try {
+                    await this.captureMapArea();
+                    const b = this.captureBounds;
+                    const scanKey = `buildings:${[b.minLat, b.minLon, b.maxLat, b.maxLon].map(value => value.toFixed(5)).join(':')}`;
+                    const existing = this.buildingCandidates.filter(item => item.scanKey === scanKey);
+                    this.showTracePreview(existing.map(item => item.geometry));
+                    if (existing.length) {
+                        this.scanProgress('Using saved building proposals', 100, `${existing.length} building outlines already exist for this area.`);
+                        this.setMode('ready', `Review the ${existing.length} saved building proposals on the map.`);
+                        return;
+                    }
+                    const image = await new Promise((resolve, reject) =>
+                        this.captureCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode image')), 'image/png'));
+                    const sw = L.CRS.EPSG3857.project(L.latLng(b.minLat, b.minLon));
+                    const ne = L.CRS.EPSG3857.project(L.latLng(b.maxLat, b.maxLon));
+                    const form = new FormData();
+                    form.append('image', image, 'imagery.png');
+                    form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
+                    this.scanProgress('Loading building model…', null, 'CPU inference may take several minutes.');
+                    const response = await fetch('/api/building-detect', { method: 'POST', body: form });
+                    if (!response.ok || !response.body) {
+                        const detail = await response.json().catch(() => ({}));
+                        throw new Error(detail.error || `HTTP ${response.status}`);
+                    }
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let pending = '', count = 0;
+                    const current = [];
+                    const handle = line => {
+                        if (!line.trim()) return;
+                        const message = JSON.parse(line);
+                        if (message.type === 'error') throw new Error(message.message);
+                        if (message.type === 'status') this.scanProgress(message.message, null);
+                        if (message.type === 'progress') this.scanProgress('Finding building footprints…',
+                            Math.round(message.current / message.total * 95), `${message.current} of ${message.total} image tiles processed. ${count} proposals found.`);
+                        if (message.type === 'building') {
+                            const candidate = { geometry: message.geometry, confidence: message.confidence,
+                                source: `${this.imagerySource}_usa_building_maskrcnn`, scanKey };
+                            this.buildingCandidates.push(candidate);
+                            current.push(candidate.geometry);
+                            count++;
+                            this.drawBuildingCandidates();
+                            this.showTracePreview(current);
+                            this.saveWork();
+                        }
+                        if (message.type === 'done') {
+                            this.scanProgress('Building scan complete', 100, `${count} unreviewed building outlines. Click each orange outline to keep or reject it.`);
+                            this.setMode('ready', `${count} building proposals found. Review them on the map before export.`);
+                        }
+                    };
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        pending += decoder.decode(value, { stream: true });
+                        let newline;
+                        while ((newline = pending.indexOf('\n')) >= 0) {
+                            handle(pending.slice(0, newline));
+                            pending = pending.slice(newline + 1);
+                        }
+                    }
+                    if (pending.trim()) handle(pending);
+                } catch (error) {
+                    this.scanProgress('Building scan stopped', null, error.message);
+                    this.setMode('error', error.message);
+                } finally {
+                    this.scanBusy = false;
+                    button.disabled = this.featureType !== 'building' ||
+                        !document.getElementById('building-model-status').textContent.startsWith('USA building');
+                }
+            }
+
+            drawBuildingCandidates() {
+                this.buildingLayer.clearLayers();
+                this.buildingCandidates.forEach((candidate, index) => {
+                    const ring = candidate.geometry.coordinates[0].map(([lon, lat]) => [lat, lon]);
+                    const shape = L.polygon(ring, { color: '#ff9b3d', weight: 2, fillOpacity: 0.12, bubblingMouseEvents: false });
+                    shape.on('click', () => this.showBuildingCandidate(index));
+                    shape.addTo(this.buildingLayer);
+                });
+                this.updateLayerCount();
+            }
+
+            showBuildingCandidate(index) {
+                const candidate = this.buildingCandidates[index];
+                if (!candidate) return;
+                document.getElementById('feature-props').innerHTML = `
+                    <h4>Building proposal #${index + 1}</h4>
+                    <div class="prop-row"><span class="prop-key">Model score</span><span class="prop-value">${candidate.confidence}</span></div>
+                    <p style="font-size:11px;line-height:1.4;">Review this roof outline against imagery before saving it.</p>
+                    <button class="btn btn-primary" onclick="detector.keepBuildingCandidate(${index})">Save Building to Reviewed Layer</button>
+                    <button class="btn btn-secondary" onclick="detector.rejectBuildingCandidate(${index})">Reject</button>`;
+            }
+
+            keepBuildingCandidate(index) {
+                const candidate = this.buildingCandidates[index];
+                if (!candidate) return;
+                this.allRoads.push({ type: 'Feature', geometry: candidate.geometry, properties: {
+                    id: `building_model_${Date.now()}_${index}`, feature_type: 'building', source: candidate.source,
+                    review_status: 'visually_kept_unverified', model_score: candidate.confidence,
+                    area_m2: this.calculateGeoArea(candidate.geometry.coordinates[0]), detected_at: new Date().toISOString()
+                }});
+                this.rejectBuildingCandidate(index);
+                this.redrawAllRoads();
+                this.updateLayerCount();
+                this.saveWork();
+                this.setMode('ready', 'Saved reviewed building footprint for export.');
+            }
+
+            rejectBuildingCandidate(index) {
+                if (!this.buildingCandidates[index]) return;
+                this.buildingCandidates.splice(index, 1);
+                this.drawBuildingCandidates();
+                this.saveWork();
                 document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
             }
 
@@ -1923,6 +2088,36 @@
                 this.previewCtx.putImageData(previewData, 0, 0);
             }
 
+            showTracePreview(geometries = []) {
+                if (!this.captureCanvas.width || !this.captureBounds) return;
+                const width = 340, height = 200, side = 200, offset = (width - side) / 2;
+                this.previewCanvas.width = width;
+                this.previewCanvas.height = height;
+                this.previewCtx.fillStyle = '#12121a';
+                this.previewCtx.fillRect(0, 0, width, height);
+                this.previewCtx.drawImage(this.captureCanvas, offset, 0, side, side);
+                const bounds = this.captureBounds;
+                const sw = L.CRS.EPSG3857.project(L.latLng(bounds.minLat, bounds.minLon));
+                const ne = L.CRS.EPSG3857.project(L.latLng(bounds.maxLat, bounds.maxLon));
+                this.previewCtx.strokeStyle = '#ff9b3d';
+                this.previewCtx.lineWidth = 2;
+                for (const geometry of geometries) {
+                    const coordinates = geometry.type === 'Polygon' ? geometry.coordinates[0] : geometry.coordinates;
+                    if (!coordinates?.length) continue;
+                    this.previewCtx.beginPath();
+                    coordinates.forEach(([lon, lat], index) => {
+                        const point = L.CRS.EPSG3857.project(L.latLng(lat, lon));
+                        const x = offset + (point.x - sw.x) / (ne.x - sw.x) * side;
+                        const y = (ne.y - point.y) / (ne.y - sw.y) * side;
+                        if (index) this.previewCtx.lineTo(x, y);
+                        else this.previewCtx.moveTo(x, y);
+                    });
+                    this.previewCtx.stroke();
+                }
+                document.getElementById('preview-help').textContent =
+                    `${geometries.length} suggested outline${geometries.length === 1 ? '' : 's'} over the captured aerial image. Review the full-size map before saving.`;
+            }
+
             previewDetection() {
                 if (!this.capturedImage) { alert('Run detection first'); return; }
 
@@ -2162,18 +2357,31 @@
                 const buildings = this.allRoads.filter(f => f.geometry.type === 'Polygon');
                 const totalLength = roads.reduce((sum, f) => sum + (f.properties.length_m || 0), 0);
                 document.getElementById('layer-count').textContent = `${roads.length} lines • ${buildings.length} buildings • ${(totalLength/1000).toFixed(2)} km roads`;
+                const buildingMode = this.featureType === 'building';
+                document.getElementById('stat-count-label').textContent = buildingMode ? 'Building Proposals' : 'Line Candidates';
+                document.getElementById('stat-measure-label').textContent = buildingMode ? 'Proposed Roof Area' : 'Total Length';
+                if (buildingMode) {
+                    const rings = this.buildingCandidates.map(candidate => candidate.geometry.coordinates[0]);
+                    const area = rings.reduce((sum, ring) => sum + this.calculateGeoArea(ring), 0);
+                    document.getElementById('stat-roads').textContent = rings.length.toLocaleString();
+                    document.getElementById('stat-length').innerHTML = `${Math.round(area).toLocaleString()}<span class="stat-unit">m²</span>`;
+                    document.getElementById('stat-vertices').textContent = rings.reduce((sum, ring) => sum + ring.length, 0).toLocaleString();
+                } else {
+                    this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
+                }
                 const saved = this.allRoads.length;
-                const proposals = this.modelRoadCandidates.length;
-                document.getElementById('export-all-traces').disabled = saved + proposals === 0;
+                const roadProposals = this.modelRoadCandidates.length;
+                const buildingProposals = this.buildingCandidates.length;
+                document.getElementById('export-all-traces').disabled = saved + roadProposals + buildingProposals === 0;
                 document.getElementById('export-all-traces').textContent =
-                    `⬇️ Export All: ${saved} saved + ${proposals} road proposals (GeoJSON)`;
+                    `⬇️ Export All: ${saved} saved + ${roadProposals} road + ${buildingProposals} building proposals`;
                 for (const id of ['export-geojson', 'export-kml', 'export-wkt', 'export-osm'])
                     document.getElementById(id).disabled = saved === 0;
                 document.getElementById('export-status').textContent = this.promptCandidate
                     ? 'Suggestion pending review. Keep it only if the outline matches the imagery; then reviewed export will include it.'
                     : saved === 0
-                        ? `${proposals} unreviewed road proposals, 0 saved features. Keep a valid suggestion or Save Trace to enable reviewed exports.`
-                        : `${roads.length} saved roads and ${buildings.length} saved buildings are ready for reviewed export. ${proposals} road proposals remain unreviewed.`;
+                        ? `${roadProposals} unreviewed road proposals, ${buildingProposals} unreviewed building proposals, 0 saved features. Save a valid outline to enable reviewed exports.`
+                        : `${roads.length} saved roads and ${buildings.length} saved buildings are ready for reviewed export. ${roadProposals} road and ${buildingProposals} building proposals remain unreviewed.`;
             }
 
             toggleLayerVisibility(visible) {
@@ -2239,9 +2447,11 @@
                 this.vectorizedRoads = [];
                 this.mappedRoadCandidates = [];
                 this.modelRoadCandidates = [];
+                this.buildingCandidates = [];
                 this.roadLayer.clearLayers();
                 this.mappedRoadLayer.clearLayers();
                 this.modelRoadLayer.clearLayers();
+                this.buildingLayer.clearLayers();
                 this.rejectPromptCandidate();
                 this.updateLayerCount();
                 this.saveWork();
@@ -2299,16 +2509,23 @@
                         scan_key: road.scanKey || null, length_m: this.calculateGeoLength(road.coordinates)
                     }
                 }));
-                const features = [...this.allRoads, ...proposals];
-                if (!features.length) { alert('No traces to export yet. Trace a feature or run a road scan first.'); return; }
+                const buildingProposals = this.buildingCandidates.map((candidate, index) => ({
+                    type: 'Feature', geometry: candidate.geometry,
+                    properties: { id: `building_proposal_${index + 1}`, feature_type: 'building', source: candidate.source,
+                        review_status: 'model_proposal_unreviewed', model_score: candidate.confidence,
+                        scan_key: candidate.scanKey || null, area_m2: this.calculateGeoArea(candidate.geometry.coordinates[0]) }
+                }));
+                const features = [...this.allRoads, ...proposals, ...buildingProposals];
+                if (!features.length) { alert('No traces to export yet. Trace a feature or run an area scan first.'); return; }
                 const geojson = {
                     type: 'FeatureCollection',
                     properties: { name: 'AetherMap traces', created: new Date().toISOString(),
-                        reviewed_count: this.allRoads.length, proposal_count: proposals.length },
+                        reviewed_count: this.allRoads.length, proposal_count: proposals.length + buildingProposals.length,
+                        road_proposal_count: proposals.length, building_proposal_count: buildingProposals.length },
                     features
                 };
                 this.downloadFile(JSON.stringify(geojson, null, 2), 'aethermap_all_traces.geojson', 'application/geo+json');
-                this.setMode('ready', `Exported ${this.allRoads.length} saved features and ${proposals.length} road proposals`);
+                this.setMode('ready', `Exported ${this.allRoads.length} saved features, ${proposals.length} road proposals, and ${buildingProposals.length} building proposals`);
             }
 
             downloadFile(content, filename, mimeType) {

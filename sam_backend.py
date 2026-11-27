@@ -24,6 +24,7 @@ LOCAL_PORT = int(os.environ.get("AETHERMAP_PORT", "8767"))
 model_lock = threading.Lock()
 road_lock = threading.Lock()
 samroad_lock = threading.Lock()
+building_lock = threading.Lock()
 mask_generator = None
 
 
@@ -235,6 +236,14 @@ def samroad_status():
     return jsonify(available=available, reason=reason, model="SAM-Road CityScale ViT-B", device="CUDA if available, otherwise CPU")
 
 
+@app.get("/api/building-status")
+def building_status():
+    from building_model import availability
+
+    available, reason = availability()
+    return jsonify(available=available, reason=reason, model="USA building footprints Mask R-CNN", device="CPU")
+
+
 @app.get("/api/reference-roads")
 def reference_roads():
     """Small-area Census TIGERweb roads for visual comparison and snapping."""
@@ -397,6 +406,56 @@ def sam_point():
         model_lock.release()
 
 
+@app.post("/api/building-detect")
+def building_detect():
+    """Stream unreviewed building polygons from the local class-specific model."""
+    import numpy as np
+    from PIL import Image
+
+    origin = request.headers.get("Origin")
+    if origin and origin != f"http://127.0.0.1:{LOCAL_PORT}":
+        return jsonify(error="This local model only accepts requests from its own page"), 403
+    if request.content_length and request.content_length > 8_000_000:
+        return jsonify(error="Image upload is too large"), 413
+    try:
+        bbox = [float(value) for value in json.loads(request.form["bbox3857"])]
+        if len(bbox) != 4 or not all(map(math.isfinite, bbox)) or bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+            raise ValueError("Invalid bounding box")
+        Image.MAX_IMAGE_PIXELS = 2_000_000
+        image = Image.open(io.BytesIO(request.files["image"].read())).convert("RGB")
+        if image.width != image.height or image.width not in {512, 1024}:
+            raise ValueError("Expected a square 512 or 1024 pixel image")
+        pixels = np.asarray(image)
+    except (KeyError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify(error=str(exc)), 400
+
+    def generate():
+        if not building_lock.acquire(blocking=False):
+            yield event("error", message="Another building scan is already running")
+            return
+        try:
+            from building_model import detect_buildings
+
+            yield event("status", message="Loading local building footprint model…")
+            count = 0
+            for result in detect_buildings(pixels, bbox):
+                if result["type"] == "progress":
+                    yield event("progress", current=result["current"], total=result["total"])
+                else:
+                    count += 1
+                    yield event("building", geometry=result["geometry"], confidence=result["confidence"],
+                                pixel_ring=result["pixel_ring"])
+            yield event("done", buildings=count)
+        except Exception as exc:
+            app.logger.exception("Building detection failed")
+            yield event("error", message=f"Building detection failed: {exc}")
+        finally:
+            building_lock.release()
+
+    return Response(stream_with_context(generate()), mimetype="application/x-ndjson",
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
 @app.post("/api/road-detect")
 def road_detect():
     """Infer road pixels from the submitted NAIP image and return centerlines."""
@@ -505,4 +564,7 @@ def samroad_detect():
 
 if __name__ == "__main__":
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
+    # Load the model libraries before Flask starts request threads on Windows.
+    import torch  # noqa: F401
+    import torchvision  # noqa: F401
     app.run(host="127.0.0.1", port=LOCAL_PORT, threaded=True, debug=False)
