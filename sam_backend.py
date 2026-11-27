@@ -28,6 +28,16 @@ building_lock = threading.Lock()
 mask_generator = None
 
 
+@app.after_request
+def allow_local_building_helper(response):
+    """Let an older 8767 page call the replacement building service on 8768."""
+    origin = request.headers.get("Origin")
+    if request.path in {"/api/building-status", "/api/building-detect"} and origin == "http://127.0.0.1:8767":
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response
+
+
 def event(kind: str, **payload) -> str:
     return json.dumps({"type": kind, **payload}, separators=(",", ":")) + "\n"
 
@@ -413,7 +423,7 @@ def building_detect():
     from PIL import Image
 
     origin = request.headers.get("Origin")
-    if origin and origin != f"http://127.0.0.1:{LOCAL_PORT}":
+    if origin and origin not in {f"http://127.0.0.1:{LOCAL_PORT}", "http://127.0.0.1:8767"}:
         return jsonify(error="This local model only accepts requests from its own page"), 403
     if request.content_length and request.content_length > 8_000_000:
         return jsonify(error="Image upload is too large"), 413

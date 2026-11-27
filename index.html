@@ -429,13 +429,13 @@
                     <label for="feature-type">Feature to trace</label>
                     <select id="feature-type"><option value="road">Road centerline</option><option value="building">Building footprint</option><option value="tree" disabled>Tree canopy (future)</option></select>
                 </div>
-                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Road for SAM Suggestion</button>
-                <p id="sam-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Click a road in imagery for a SAM suggestion. Review the result before saving.</p>
-                <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <div id="building-model-controls" hidden>
-                    <button class="btn btn-primary" id="btn-building-model" disabled>🏢 Find Buildings in Area (Local)</button>
+                    <button class="btn btn-primary" id="btn-building-model" disabled>🏢 Find Multiple Buildings in Area</button>
                     <p id="building-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking building model…</p>
                 </div>
+                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Suggest One Road from Click</button>
+                <p id="sam-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Click a road in imagery for a SAM suggestion. Review the result before saving.</p>
+                <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <div id="road-model-controls">
                 <button class="btn btn-primary" id="btn-samroad-model" disabled>🕸️ Find Roads with SAM-Road (Local)</button>
                 <p id="samroad-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking SAM-Road graph model…</p>
@@ -542,6 +542,10 @@
 
             <div class="section-title">Candidate Layer</div>
             <div id="layer-list">
+                <label style="display:flex;align-items:center;gap:8px;margin:0 0 10px;color:#d9deed;font-size:12px;">
+                    <input type="checkbox" id="road-proposals-visible" checked onchange="detector.toggleRoadProposals(this.checked)">
+                    <span id="road-proposals-label">Show road proposals</span>
+                </label>
                 <div class="layer-item active">
                     <input type="checkbox" checked onchange="detector.toggleLayerVisibility(this.checked)">
                     <div class="layer-color" style="background: #00ff88;"></div>
@@ -613,6 +617,7 @@
                 this.modelRoadCandidates = [];
                 this.buildingCandidates = [];
                 this.scanBusy = false;
+                this.buildingApiBase = '';
                 this.storageKey = 'aethermap-work-v1';
 
                 this.captureCanvas = document.getElementById('capture-canvas');
@@ -1121,15 +1126,21 @@
                 const status = document.getElementById('building-model-status');
                 const button = document.getElementById('btn-building-model');
                 try {
-                    const response = await fetch('/api/building-status', { cache: 'no-store' });
-                    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local backend');
+                    let response = await fetch('/api/building-status', { cache: 'no-store' });
+                    if (response.status === 404 && location.origin === 'http://127.0.0.1:8767') {
+                        this.buildingApiBase = 'http://127.0.0.1:8768';
+                        response = await fetch(`${this.buildingApiBase}/api/building-status`, { cache: 'no-store' });
+                    }
+                    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('No local building service');
                     const info = await response.json();
                     if (!info.available) throw new Error(info.reason || 'Model unavailable');
                     button.disabled = this.featureType !== 'building';
-                    status.textContent = 'USA building footprint model ready on CPU. Area scans zoom to roof detail automatically; review every suggestion.';
+                    status.textContent = 'USA building model ready. This scans multiple roofs in the selected area; review every proposal.';
                 } catch (error) {
                     button.disabled = true;
-                    status.textContent = error.message === 'No local backend' ? 'Area building detection requires the local launcher.' : `Building model unavailable: ${error.message}`;
+                    status.textContent = error.message === 'No local building service'
+                        ? 'Area scan unavailable: reopen AetherMap Local to start its building service.'
+                        : `Building model unavailable: ${error.message}`;
                 }
             }
 
@@ -1143,7 +1154,7 @@
                 document.getElementById('building-model-controls').hidden = !building;
                 document.getElementById('road-reference-controls').hidden = building;
                 document.getElementById('btn-trace').textContent = building ? '✍️ Trace Building on Map' : '✍️ Trace Road on Map';
-                document.getElementById('btn-sam-point').textContent = building ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
+                document.getElementById('btn-sam-point').textContent = building ? '🧠 Suggest One Building from Click' : '🧠 Suggest One Road from Click';
                 document.getElementById('model-help').textContent = building
                     ? 'Use SAM to suggest one roof footprint or draw it by hand, then review the outline.'
                     : 'SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.';
@@ -1163,8 +1174,8 @@
                 document.getElementById('btn-building-model').disabled = !building || !document.getElementById('building-model-status').textContent.startsWith('USA building');
                 this.mappedRoadCandidates = [];
                 this.mappedRoadLayer.clearLayers();
-                if (building) this.map.removeLayer(this.modelRoadLayer);
-                else this.map.addLayer(this.modelRoadLayer);
+                document.getElementById('road-proposals-visible').checked = !building;
+                this.toggleRoadProposals(!building);
                 if (building) this.map.addLayer(this.buildingLayer);
                 else this.map.removeLayer(this.buildingLayer);
                 this.updateLayerCount();
@@ -1177,7 +1188,7 @@
                     this.promptMode = false;
                     document.body.classList.remove('trace-active');
                     document.getElementById('btn-sam-point').textContent = this.featureType === 'building'
-                        ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
+                        ? '🧠 Suggest One Building from Click' : '🧠 Suggest One Road from Click';
                     this.setMode('ready', 'SAM selection cancelled');
                     this.hideScanProgress();
                     return;
@@ -1432,7 +1443,7 @@
                     form.append('image', image, 'imagery.png');
                     form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
                     this.scanProgress('Loading building model…', null, 'CPU inference may take several minutes.');
-                    const response = await fetch('/api/building-detect', { method: 'POST', body: form });
+                    const response = await fetch(`${this.buildingApiBase}/api/building-detect`, { method: 'POST', body: form });
                     if (!response.ok || !response.body) {
                         const detail = await response.json().catch(() => ({}));
                         throw new Error(detail.error || `HTTP ${response.status}`);
@@ -2376,6 +2387,7 @@
                 const saved = this.allRoads.length;
                 const roadProposals = this.modelRoadCandidates.length;
                 const buildingProposals = this.buildingCandidates.length;
+                document.getElementById('road-proposals-label').textContent = `Show road proposals (${roadProposals})`;
                 document.getElementById('export-all-traces').disabled = saved + roadProposals + buildingProposals === 0;
                 document.getElementById('export-all-traces').textContent =
                     `⬇️ Export All: ${saved} saved + ${roadProposals} road + ${buildingProposals} building proposals`;
@@ -2391,6 +2403,11 @@
             toggleLayerVisibility(visible) {
                 if (visible) this.map.addLayer(this.roadLayer);
                 else this.map.removeLayer(this.roadLayer);
+            }
+
+            toggleRoadProposals(visible) {
+                if (visible) this.map.addLayer(this.modelRoadLayer);
+                else this.map.removeLayer(this.modelRoadLayer);
             }
 
             zoomToLayer() {

@@ -34,4 +34,38 @@ if (-not (Test-AetherMapServer)) {
     exit $LASTEXITCODE
 }
 
+try {
+    Invoke-RestMethod -Uri "${url}api/building-status" -TimeoutSec 3 | Out-Null
+} catch {
+    # A previous AetherMap process may still be serving the page without the
+    # newer building endpoint. Keep its browser storage on 8767 and add a
+    # separate loopback building service rather than replacing that process.
+    $helperUrl = 'http://127.0.0.1:8768/api/building-status'
+    try {
+        Invoke-RestMethod -Uri $helperUrl -TimeoutSec 2 | Out-Null
+    } catch {
+        $occupied = Get-NetTCPConnection -LocalPort 8768 -State Listen -ErrorAction SilentlyContinue
+        if ($occupied) {
+            Write-Error 'Building helper port 8768 is occupied by another service.'
+            exit 1
+        }
+        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            ('"' + (Join-Path $root 'start-building-helper.ps1') + '"')
+        )
+        $ready = $false
+        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            try {
+                Invoke-RestMethod -Uri $helperUrl -TimeoutSec 2 | Out-Null
+                $ready = $true
+                break
+            } catch { Start-Sleep -Milliseconds 500 }
+        }
+        if (-not $ready) {
+            Write-Error 'The building model service did not start. Close the old AetherMap launcher and reopen this launcher.'
+            exit 1
+        }
+    }
+}
+
 Start-Process $url
