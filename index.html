@@ -557,9 +557,9 @@
             </div>
 
             <div class="section-title">Save and Export Traces</div>
-            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 9px;">Save Trace or Keep road adds a feature to the reviewed layer. Work is saved in this browser. Download a GeoJSON file for a portable copy.</p>
-            <button class="btn btn-primary" id="export-all-traces">⬇️ Export All Traces (GeoJSON)</button>
-            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Includes saved features and automatic road proposals, each marked with its review status.</p>
+            <p id="export-status" role="status" aria-live="polite" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 9px;">Save Trace or Keep suggestion before exporting reviewed features.</p>
+            <button class="btn btn-primary" id="export-all-traces" disabled>⬇️ Export All (GeoJSON)</button>
+            <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">All export includes unreviewed road proposals. Check their review status before using them.</p>
             <div class="section-title">Export Reviewed Features Only</div>
             <div class="export-grid">
                 <button class="btn btn-secondary export-btn" id="export-geojson">📄 GeoJSON</button>
@@ -969,6 +969,10 @@
                 else bar.value = Math.max(0, Math.min(100, percent));
             }
 
+            hideScanProgress() {
+                document.getElementById('scan-progress').classList.remove('active');
+            }
+
             showProcessing(show, text = 'Processing...', detail = '') {
                 document.getElementById('processing-overlay').classList.toggle('active', show);
                 document.getElementById('processing-text').textContent = text;
@@ -1142,6 +1146,7 @@
                     document.getElementById('btn-sam-point').textContent = this.featureType === 'building'
                         ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
                     this.setMode('ready', 'SAM selection cancelled');
+                    this.hideScanProgress();
                     return;
                 }
                 if (this.traceMode) this.toggleTrace();
@@ -1158,6 +1163,8 @@
                 document.body.classList.add('trace-active');
                 document.getElementById('btn-sam-point').textContent = '✕ Cancel SAM Selection';
                 this.setMode('tracing', `Click one visible ${this.featureType} in the aerial imagery for a SAM suggestion`);
+                this.scanProgress(`Waiting for a ${this.featureType} click…`, null,
+                    'Click the center of the visible feature. SAM will suggest one outline.');
             }
 
             async promptTraceAt(latlng) {
@@ -1170,10 +1177,12 @@
                 }
                 const selectedType = this.featureType;
                 this.setMode('detecting', `Reading imagery around the selected ${selectedType}…`);
+                this.scanProgress('Capturing aerial imagery…', 10, 'Preparing the image around your click.');
                 try {
                     document.getElementById('center-lat').value = latlng.lat.toFixed(6);
                     document.getElementById('center-lon').value = latlng.lng.toFixed(6);
                     await this.captureMapArea();
+                    this.scanProgress('Preparing image for SAM…', 25, 'Encoding the selected imagery.');
                     const image = await new Promise((resolve, reject) =>
                         this.captureCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode image')), 'image/png'));
                     const b = this.captureBounds;
@@ -1186,6 +1195,8 @@
                     form.append('seed_y', String(b.height / 2));
                     form.append('feature_type', selectedType);
                     this.setMode('detecting', `SAM tracing the selected ${selectedType} in ${this.activeImagerySource()} imagery…`);
+                    this.scanProgress(`SAM is outlining the selected ${selectedType}…`, null,
+                        'The local model runs on CPU; this may take several minutes.');
                     const response = await fetch('/api/sam-point', { method: 'POST', body: form });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -1200,8 +1211,11 @@
                     shape.on('click', () => this.showPromptCandidate());
                     this.showPromptCandidate();
                     this.setMode('ready', `SAM suggested a ${selectedType}; inspect the overlay before keeping it`);
+                    this.scanProgress('Suggestion ready for review', 100,
+                        'Inspect the outline. Keep it only if it follows the selected feature.');
                 } catch (error) {
                     this.setMode('error', error.message);
+                    this.scanProgress('SAM suggestion failed', 100, error.message);
                 }
             }
 
@@ -1213,8 +1227,10 @@
                     <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">${this.activeImagerySource()} + point-prompted SAM</span></div>
                     <div class="prop-row"><span class="prop-key">SAM score</span><span class="prop-value">${p.score}</span></div>
                     <p style="font-size:11px;line-height:1.4;">SAM has no feature labels. Keep this only if the overlay follows the selected object in the image.</p>
-                    <button class="btn btn-primary" onclick="detector.keepPromptCandidate()">Keep suggestion</button>
+                    <button class="btn btn-primary" onclick="detector.keepPromptCandidate()">Save ${p.feature_type === 'building' ? 'Building' : 'Road'} to Reviewed Layer</button>
                     <button class="btn btn-secondary" onclick="detector.rejectPromptCandidate()">Reject</button>`;
+                document.getElementById('export-status').textContent =
+                    'Suggestion pending review. Keep it only if the outline matches the imagery; then reviewed export will include it.';
             }
 
             keepPromptCandidate() {
@@ -1233,12 +1249,15 @@
                 this.updateLayerCount();
                 this.saveWork();
                 this.setMode('ready', `Saved visually reviewed ${p.feature_type} suggestion`);
+                this.scanProgress(`${p.feature_type === 'building' ? 'Building' : 'Road'} saved`, 100,
+                    'The reviewed feature is now available in the export buttons.');
             }
 
             rejectPromptCandidate() {
                 this.promptCandidate = null;
                 if (this.promptLayer) this.promptLayer.clearLayers();
                 document.getElementById('feature-props').innerHTML = '<h4>No feature selected</h4>';
+                this.updateLayerCount();
             }
 
             clipRoadLine(line, bounds) {
@@ -1446,6 +1465,7 @@
                     shape.on('click', () => this.showModelRoadCandidate(index));
                     shape.addTo(this.modelRoadLayer);
                 });
+                this.updateLayerCount();
             }
 
             showModelRoadCandidate(index) {
@@ -1536,6 +1556,7 @@
                     document.getElementById('btn-undo-point').disabled = true;
                     document.getElementById('btn-finish-trace').disabled = true;
                     this.setMode('ready', 'Trace cancelled');
+                    this.hideScanProgress();
                     return;
                 }
                 if (this.promptMode) this.togglePromptMode();
@@ -1557,6 +1578,8 @@
                 this.setMode('tracing', this.traceFeatureType === 'building'
                     ? 'Click around the visible building roof; drag orange vertices to correct the footprint'
                     : 'Click road center points on the map; drag yellow vertices to correct them');
+                this.scanProgress(`Tracing ${this.traceFeatureType} by hand…`, null,
+                    `Place at least ${this.traceFeatureType === 'building' ? '3 boundary' : '2 centerline'} points, then Save Trace.`);
             }
 
             addTracePoint(latlng) {
@@ -1593,6 +1616,10 @@
                 document.getElementById('btn-undo-point').disabled = this.tracePoints.length === 0;
                 document.getElementById('btn-finish-trace').disabled = this.tracePoints.length < (building ? 3 : 2);
                 this.setMode('tracing', `${this.tracePoints.length} ${building ? 'building boundary' : 'road center'} points — save when the outline follows the imagery`);
+                const minimum = building ? 3 : 2;
+                this.scanProgress(this.tracePoints.length >= minimum ? 'Trace ready to save' : `Tracing ${building ? 'building' : 'road'}…`,
+                    Math.min(95, Math.round(this.tracePoints.length / minimum * 75)),
+                    `${this.tracePoints.length} point${this.tracePoints.length === 1 ? '' : 's'} placed. ${this.tracePoints.length >= minimum ? 'Review the line, then select Save Trace.' : `At least ${minimum} points are needed.`}`);
             }
 
             finishTrace() {
@@ -1620,6 +1647,7 @@
                 this.updateLayerCount();
                 this.saveWork();
                 this.setMode('ready', edited ? `Saved corrected ${building ? 'building footprint' : 'road centerline'}` : `Saved ${building ? 'building footprint' : 'road centerline'} to export layer`);
+                this.scanProgress('Trace saved', 100, 'The reviewed feature is now available for export.');
             }
 
             startEditFeature(index) {
@@ -2134,6 +2162,18 @@
                 const buildings = this.allRoads.filter(f => f.geometry.type === 'Polygon');
                 const totalLength = roads.reduce((sum, f) => sum + (f.properties.length_m || 0), 0);
                 document.getElementById('layer-count').textContent = `${roads.length} lines • ${buildings.length} buildings • ${(totalLength/1000).toFixed(2)} km roads`;
+                const saved = this.allRoads.length;
+                const proposals = this.modelRoadCandidates.length;
+                document.getElementById('export-all-traces').disabled = saved + proposals === 0;
+                document.getElementById('export-all-traces').textContent =
+                    `⬇️ Export All: ${saved} saved + ${proposals} road proposals (GeoJSON)`;
+                for (const id of ['export-geojson', 'export-kml', 'export-wkt', 'export-osm'])
+                    document.getElementById(id).disabled = saved === 0;
+                document.getElementById('export-status').textContent = this.promptCandidate
+                    ? 'Suggestion pending review. Keep it only if the outline matches the imagery; then reviewed export will include it.'
+                    : saved === 0
+                        ? `${proposals} unreviewed road proposals, 0 saved features. Keep a valid suggestion or Save Trace to enable reviewed exports.`
+                        : `${roads.length} saved roads and ${buildings.length} saved buildings are ready for reviewed export. ${proposals} road proposals remain unreviewed.`;
             }
 
             toggleLayerVisibility(visible) {
