@@ -1126,7 +1126,7 @@
                     const info = await response.json();
                     if (!info.available) throw new Error(info.reason || 'Model unavailable');
                     button.disabled = this.featureType !== 'building';
-                    status.textContent = 'USA building footprint model ready on CPU. Zoom to 18 or closer; review every suggested roof.';
+                    status.textContent = 'USA building footprint model ready on CPU. Area scans zoom to roof detail automatically; review every suggestion.';
                 } catch (error) {
                     button.disabled = true;
                     status.textContent = error.message === 'No local backend' ? 'Area building detection requires the local launcher.' : `Building model unavailable: ${error.message}`;
@@ -1396,11 +1396,6 @@
 
             async findBuildingsInImagery() {
                 if (this.featureType !== 'building' || this.scanBusy) return;
-                if (this.map.getZoom() < 18) {
-                    this.setMode('error', 'Zoom to level 18 or closer before finding buildings. The model needs detailed roof imagery.');
-                    this.scanProgress('Zoom in for building detection', 0, 'Zoom to 18 or closer, then run Find Buildings in Area.');
-                    return;
-                }
                 if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
                     this.setMode('error', `Wait for ${this.activeImagerySource()} imagery to appear before finding buildings`);
                     return;
@@ -1408,8 +1403,17 @@
                 const button = document.getElementById('btn-building-model');
                 this.scanBusy = true;
                 button.disabled = true;
-                this.scanProgress('Capturing roof imagery…', null, 'Preparing the selected map area.');
                 try {
+                    if (this.map.getZoom() < 18) {
+                        const center = [Number(document.getElementById('center-lat').value),
+                            Number(document.getElementById('center-lon').value)];
+                        this.scanProgress('Zooming to roof detail…', 5, 'Centering the building scan at the selected location.');
+                        await new Promise(resolve => {
+                            this.map.once('moveend', resolve);
+                            this.map.setView(center, 18, { animate: false });
+                        });
+                    }
+                    this.scanProgress('Capturing roof imagery…', null, 'Preparing the selected map area.');
                     await this.captureMapArea();
                     const b = this.captureBounds;
                     const scanKey = `buildings:${[b.minLat, b.minLon, b.maxLat, b.maxLon].map(value => value.toFixed(5)).join(':')}`;
