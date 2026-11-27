@@ -429,30 +429,34 @@
                     <label for="feature-type">Feature to trace</label>
                     <select id="feature-type"><option value="road">Road centerline</option><option value="building">Building footprint</option><option value="tree" disabled>Tree canopy (future)</option></select>
                 </div>
+                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Road for SAM Suggestion</button>
+                <p id="sam-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Click a road in imagery for a SAM suggestion. Review the result before saving.</p>
+                <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
+                <div id="road-model-controls">
                 <button class="btn btn-primary" id="btn-samroad-model" disabled>🕸️ Find Roads with SAM-Road (Local)</button>
                 <p id="samroad-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking SAM-Road graph model…</p>
                 <button class="btn btn-secondary" id="btn-road-model" disabled>⚡ Quick Road Preview (Lower Detail)</button>
                 <p id="road-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking quick road model…</p>
                 <p id="model-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.</p>
+                </div>
                 <div class="scan-progress" id="scan-progress" role="status" aria-live="polite">
                     <div class="scan-progress-label" id="scan-progress-label">Preparing imagery…</div>
                     <progress id="scan-progress-bar" max="100"></progress>
                     <small id="scan-progress-detail">Results appear on the map as they arrive.</small>
                 </div>
                 <p id="autosave-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">Reviewed features and road proposals are saved in this browser.</p>
-                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Road for SAM Suggestion</button>
-                <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Compare with Census Roads</button>
-                <p id="sam-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Click a road in imagery for a SAM suggestion. Census roads are existing map data for comparison.</p>
-                <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
                 <p id="trace-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="btn-undo-point" disabled>↶ Undo Point</button>
                     <button class="btn btn-primary" id="btn-finish-trace" disabled>✓ Save Trace</button>
                 </div>
-                <button class="btn btn-secondary" id="btn-osm" disabled>Load Census Snapping Reference</button>
-                <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby Census roads</label>
-                <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Census reference requires the local launcher.</p>
+                <div id="road-reference-controls">
+                    <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Compare with Census Roads</button>
+                    <button class="btn btn-secondary" id="btn-osm" disabled>Load Census Snapping Reference</button>
+                    <label style="display:flex;align-items:center;gap:7px;font-size:11px;color:#aeb3c5;margin:1px 0 7px;"><input type="checkbox" id="snap-osm"> Snap new points to nearby Census roads</label>
+                    <p id="osm-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Census reference requires the local launcher.</p>
+                </div>
                 <details style="margin-top:12px;color:#aeb3c5;font-size:11px;"><summary>Generic image-line diagnostics (not feature classified)</summary>
                     <button class="btn btn-secondary" id="btn-detect">Find Line Candidates</button>
                     <button class="btn btn-secondary" id="btn-vectorize">Vectorize Candidates</button>
@@ -897,8 +901,24 @@
                         this.mapView = saved.mapView;
                         document.getElementById('map-view').value = saved.mapView;
                     }
+                    if (['road', 'building'].includes(saved.featureType)) {
+                        document.getElementById('feature-type').value = saved.featureType;
+                        this.featureType = saved.featureType;
+                    }
                     if (saved.view && Array.isArray(saved.view.center) && Number.isFinite(saved.view.zoom))
                         this.map.setView(saved.view.center, saved.view.zoom);
+                    // Browser storage keeps vectors, but an uploaded File/URL cannot survive a reload.
+                    if (this.imagerySource === 'local' && !this.localImage) {
+                        if (this.isUsImageryArea()) {
+                            this.imagerySource = 'usgs';
+                            document.getElementById('imagery-source').value = 'usgs';
+                        } else {
+                            this.mapView = 'roads';
+                            document.getElementById('map-view').value = 'roads';
+                            document.getElementById('imagery-help').textContent =
+                                'Your saved traces are restored. Reload the local aerial image and its WGS84 bounds to trace here; browser security does not keep the selected file after a refresh.';
+                        }
+                    }
                     if ([512, 1024].includes(Number(saved.captureSize)))
                         document.getElementById('capture-size').value = String(saved.captureSize);
                     if (Array.isArray(saved.detectionCenter) && saved.detectionCenter.every(Number.isFinite)) {
@@ -911,6 +931,7 @@
                     this.updateLayerCount();
                     this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
                     this.loadVisibleImagery();
+                    this.setFeatureType();
                     document.getElementById('autosave-status').textContent =
                         `Restored ${this.allRoads.length} reviewed features and ${this.modelRoadCandidates.length} road proposals from this browser.`;
                 } catch (error) {
@@ -925,7 +946,7 @@
                     localStorage.setItem(this.storageKey, JSON.stringify({
                         version: 1, savedAt: new Date().toISOString(), features: this.allRoads,
                         proposals: this.modelRoadCandidates,
-                        mapView: this.mapView, imagerySource: this.imagerySource,
+                        mapView: this.mapView, imagerySource: this.imagerySource, featureType: this.featureType,
                         view: { center: [this.map.getCenter().lat, this.map.getCenter().lng], zoom: this.map.getZoom() },
                         captureSize: Number(document.getElementById('capture-size').value),
                         detectionCenter: [Number(document.getElementById('center-lat').value), Number(document.getElementById('center-lon').value)]
@@ -1086,13 +1107,15 @@
                 this.featureType = document.getElementById('feature-type').value;
                 this.rejectPromptCandidate();
                 const building = this.featureType === 'building';
+                document.getElementById('road-model-controls').hidden = building;
+                document.getElementById('road-reference-controls').hidden = building;
                 document.getElementById('btn-trace').textContent = building ? '✍️ Trace Building on Map' : '✍️ Trace Road on Map';
                 document.getElementById('btn-sam-point').textContent = building ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
                 document.getElementById('model-help').textContent = building
-                    ? 'The road graph models do not detect buildings. Use SAM to suggest one roof footprint or draw it by hand, then review the outline.'
+                    ? 'Use SAM to suggest one roof footprint or draw it by hand, then review the outline.'
                     : 'SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.';
                 document.getElementById('sam-help').textContent = building
-                    ? 'Click a visible roof in imagery for a SAM footprint suggestion. SAM does not know which objects are buildings; inspect the outline before saving.'
+                    ? 'Click one visible roof in imagery for a SAM footprint suggestion, or trace it by hand. SAM does not classify buildings and an area-wide building model is not connected; inspect each outline before saving.'
                     : 'Click a road in imagery for a SAM suggestion. Census roads are existing map data for comparison.';
                 document.getElementById('btn-samroad-model').textContent = building ? 'Building model unavailable (use SAM below)' : '🕸️ Find Roads with SAM-Road (Local)';
                 document.getElementById('btn-road-model').textContent = building ? 'Quick road preview unavailable for buildings' : '⚡ Quick Road Preview (Lower Detail)';
@@ -1109,6 +1132,7 @@
                 if (building) this.map.removeLayer(this.modelRoadLayer);
                 else this.map.addLayer(this.modelRoadLayer);
                 this.setMode('ready', `Selected ${building ? 'building footprint' : 'road centerline'} tracing`);
+                this.saveWork();
             }
 
             togglePromptMode() {
