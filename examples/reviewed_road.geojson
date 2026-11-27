@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -112.0755565,
+            33.4482727
+          ],
+          [
+            -112.0741081,
+            33.4482727
+          ],
+          [
+            -112.0726866,
+            33.4482727
+          ]
+        ]
+      },
+      "properties": {
+        "id": "trace_1795759251069",
+        "feature_type": "road",
+        "source": "user_traced_from_usgs_imagery",
+        "review_status": "user_traced_unverified",
+        "detected_at": "2026-11-27T06:00:51.069Z",
+        "length_m": 266
+      }
+    }
+  ],
+  "properties": {
+    "name": "AetherMap reviewed features",
+    "created": "2026-11-27T06:00:52.618Z"
+  }
+}
