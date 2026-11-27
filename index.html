@@ -1427,7 +1427,8 @@
                     this.scanProgress('Capturing roof imagery…', null, 'Preparing the selected map area.');
                     await this.captureMapArea();
                     const b = this.captureBounds;
-                    const scanKey = `buildings:${[b.minLat, b.minLon, b.maxLat, b.maxLon].map(value => value.toFixed(5)).join(':')}`;
+                    const areaKey = [b.minLat, b.minLon, b.maxLat, b.maxLon].map(value => value.toFixed(5)).join(':');
+                    const scanKey = `buildings-v2:${areaKey}`;
                     const existing = this.buildingCandidates.filter(item => item.scanKey === scanKey);
                     this.showTracePreview(existing.map(item => item.geometry));
                     if (existing.length) {
@@ -1451,15 +1452,23 @@
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let pending = '', count = 0;
+                    let replacedLegacy = false;
                     const current = [];
+                    const replaceLegacy = () => {
+                        if (replacedLegacy) return;
+                        const oldKey = `buildings:${areaKey}`;
+                        this.buildingCandidates = this.buildingCandidates.filter(item => item.scanKey !== oldKey);
+                        replacedLegacy = true;
+                    };
                     const handle = line => {
                         if (!line.trim()) return;
                         const message = JSON.parse(line);
                         if (message.type === 'error') throw new Error(message.message);
                         if (message.type === 'status') this.scanProgress(message.message, null);
                         if (message.type === 'progress') this.scanProgress('Finding building footprints…',
-                            Math.round(message.current / message.total * 95), `${message.current} of ${message.total} image tiles processed. ${count} proposals found.`);
+                            Math.round(message.current / message.total * 95), `${message.current} of ${message.total} image tiles processed. Removing overlapping outlines after the last tile.`);
                         if (message.type === 'building') {
+                            replaceLegacy();
                             const candidate = { geometry: message.geometry, confidence: message.confidence,
                                 source: `${this.imagerySource}_usa_building_maskrcnn`, scanKey };
                             this.buildingCandidates.push(candidate);
@@ -1470,6 +1479,9 @@
                             this.saveWork();
                         }
                         if (message.type === 'done') {
+                            replaceLegacy();
+                            this.drawBuildingCandidates();
+                            this.saveWork();
                             this.scanProgress('Building scan complete', 100, `${count} unreviewed building outlines. Click each orange outline to keep or reject it.`);
                             this.setMode('ready', `${count} building proposals found. Review them on the map before export.`);
                         }
