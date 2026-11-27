@@ -4,10 +4,10 @@ A prototype for tracing visible roads and building footprints from aerial imager
 
 ## Run locally
 
-Double-click `start-local-sam.bat` and open `http://127.0.0.1:8767/`. Port **8767** keeps this app separate from the other local service on 8766. The launcher uses the installed QGIS 3.44.1 Python runtime. The service binds only to `127.0.0.1`.
+Double-click `start-local-sam.bat` or the **AetherMap Local** desktop shortcut. The launcher starts the installed QGIS 3.44.1 Python runtime, waits for the local service, then opens `http://127.0.0.1:8767/`. Keep the launcher window open while using local models; errors appear there. If AetherMap is already running, the launcher opens the existing service. Port **8767** keeps this app separate from the other local service on 8766. The service binds only to `127.0.0.1`. Double-clicking `index.html` directly does not start the models; it displays a link to the running app and launcher guidance.
 
-1. Pan and zoom to a contiguous U.S. location. The map and analysis image use [USGS NAIP aerial imagery](https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer).
-2. Select **Road centerline**, then **Trace Roads with SAM-Road (Local)**. Its road graph is predicted from aerial imagery. Solid purple proposals appear as the image and graph tiles finish; click each line to keep or reject it. **Quick Road Preview (Lower Detail)** runs a smaller 256-pixel segmentation model and shows dashed amber proposals. Select a kept line to edit its vertices.
+1. Choose **Imagery** or **Road map** from the map display control. The global road map uses [OpenFreeMap](https://openfreemap.org/). In the contiguous U.S., imagery and analysis use [USGS NAIP aerial imagery](https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer). Elsewhere, choose **My georeferenced image**, select a PNG/JPEG you have rights to analyze, and enter its WGS84 west, south, east, and north bounds. The image is held in the browser for this session; reload it after refreshing the page.
+2. Select **Road centerline**, then **Find Roads with SAM-Road (Local)**. Its road graph is predicted from aerial imagery. Solid purple proposals appear as the image and graph tiles finish; click each line to keep or reject it. **Quick Road Preview (Lower Detail)** runs a smaller 256-pixel segmentation model and shows dashed amber proposals. Select a kept line to edit its vertices.
 3. For a roof, select **Building footprint**. Trace its boundary on the map, or click it with the local SAM prompt tool. The SAM result needs visual review because SAM itself has no road/building class label.
 4. **Compare with Census Roads** displays red U.S. Census TIGERweb centerlines as reference proposals. These come from map data, not image detection. A blue Census reference layer can also be loaded for manual snapping. Census roads may be offset from the imagery and need review.
 5. **Save Trace** stores a hand-drawn line or footprint in the reviewed layer. **Keep road** does the same for a selected model proposal. **Export All Traces (GeoJSON)** downloads both saved features and unreviewed automatic road proposals, each with its source and review status. The other export buttons download reviewed features only in GeoJSON, KML, WKT, or OSM XML. OSM XML does not assign a `highway` tag to model predictions.
@@ -18,7 +18,7 @@ The **Generic image-line diagnostics** section holds the older edge and automati
 
 ## Models and limits
 
-The road detector uses the [MIT-licensed `manish2607/road_extrcation_model_BAH` TorchScript model](https://huggingface.co/manish2607/road_extrcation_model_BAH). The local service downloads its 57 MB checkpoint into `~/.cache/aethermap/` on first use and verifies its SHA-256. It predicts a road probability mask from the selected NAIP image; the backend skeletonizes that mask into centerline proposals. The model card has no measured IoU or Dice score. Our Phoenix trial followed several main streets and avoided most roofs, but missed a shaded street segment and has not been benchmarked on labeled road data. Proposals remain unverified until reviewed.
+The road detector uses the [MIT-licensed `manish2607/road_extrcation_model_BAH` TorchScript model](https://huggingface.co/manish2607/road_extrcation_model_BAH). The local service downloads its 57 MB checkpoint into `~/.cache/aethermap/` on first use and verifies its SHA-256. It predicts a road probability mask from the selected imagery; the backend skeletonizes that mask into centerline proposals. The model card has no measured IoU or Dice score. Our Phoenix trial followed several main streets and avoided most roofs, but missed a shaded street segment and has not been benchmarked on labeled road data. Proposals remain unverified until reviewed. Performance on imagery outside its training domain has not been validated.
 
 The local generic SAM checkpoint is `~/.cache/sam/sam_vit_h_4b8939.pth`. SAM ViT-H runs on CPU here and may take several minutes on first use. A click prompts a mask at that location; road mode extracts a line skeleton and building mode extracts a polygon boundary. It does not classify the clicked object. Tree tracing is disabled until a class-specific workflow is implemented.
 
@@ -28,13 +28,13 @@ For inference, the app prefers `~/.cache/aethermap/cityscale_inference_state.pt`
 
 The supplied `BUILDING_FOOTPRINT_EXTRACTION_-_INDIA.dlpk` is an ArcGIS package trained on India imagery and is **not loaded by this web app**. A separate local `usa_building_footprints.dlpk` was found, but automatic building extraction still needs an adapter and validation. [SAM-Road++](https://github.com/earth-insights/samroadplus) remains a possible future benchmark if the authors release compatible trained weights.
 
-USGS imagery is fetched on demand and not committed to GitHub. The model weights are cached outside the repository. The public GitHub Pages site cannot run the Python endpoints; manual road and building tracing remain available there. Leaflet loads from a public CDN, with [USGS Topo](https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer) as the fallback map while NAIP loads or outside coverage. Census road reference uses [TIGERweb](https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_PhysicalFeatures/MapServer/layers) through the local service; no OpenStreetMap tile or road request is needed.
+USGS imagery is fetched on demand and not committed to GitHub. The model weights are cached outside the repository. The public GitHub Pages site cannot run the Python endpoints; manual road and building tracing remain available there. Leaflet and MapLibre load from public CDNs. OpenFreeMap serves the global road map using OpenStreetMap data on its own infrastructure, avoiding the blocked volunteer tile servers. Census road reference uses [TIGERweb](https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_PhysicalFeatures/MapServer/layers) through the local service and is limited to the U.S.
 
 ## Attribution
 
 - Prototype and application: Randall Morales.
 - Aerial imagery: USGS / USDA NAIP via The National Map.
-- Map and road reference: © OpenStreetMap contributors.
+- Road map: OpenFreeMap, © OpenMapTiles, and OpenStreetMap contributors.
 - Map interface: [Leaflet](https://leafletjs.com/).
 - Road segmentation model: [manish2607 on Hugging Face](https://huggingface.co/manish2607/road_extrcation_model_BAH), MIT.
 

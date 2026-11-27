@@ -200,6 +200,11 @@ def home():
     return send_from_directory(ROOT, "index.html")
 
 
+@app.get("/api/health")
+def health():
+    return jsonify(app="aethermap-road-demo", port=LOCAL_PORT)
+
+
 @app.get("/api/sam-status")
 def sam_status():
     try:

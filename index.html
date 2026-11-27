@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AetherMap Feature Tracer</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.12.0/dist/maplibre-gl.css" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -169,7 +170,7 @@
         .map-overlay {
             position: absolute;
             top: 20px;
-            left: 20px;
+            left: 62px;
             background: rgba(18, 18, 26, 0.95);
             padding: 12px 16px;
             border-radius: 8px;
@@ -361,7 +362,7 @@
 
             <div class="mode-indicator">
                 <div class="mode-dot" id="mode-dot"></div>
-                <span class="mode-text" id="mode-text">Ready — click a U.S. location to set the analysis area</span>
+                <span class="mode-text" id="mode-text">Ready — click a location to set the analysis area</span>
             </div>
             <p style="font-size:12px;line-height:1.5;color:#aeb3c5;margin:-8px 0 18px;">Trace a selected feature from the aerial image. SAM suggestions require visual review.</p>
 
@@ -428,20 +429,20 @@
                     <label for="feature-type">Feature to trace</label>
                     <select id="feature-type"><option value="road">Road centerline</option><option value="building">Building footprint</option><option value="tree" disabled>Tree canopy (future)</option></select>
                 </div>
-                <button class="btn btn-primary" id="btn-samroad-model" disabled>🕸️ Trace Roads with SAM-Road (Local)</button>
+                <button class="btn btn-primary" id="btn-samroad-model" disabled>🕸️ Find Roads with SAM-Road (Local)</button>
                 <p id="samroad-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking SAM-Road graph model…</p>
                 <button class="btn btn-secondary" id="btn-road-model" disabled>⚡ Quick Road Preview (Lower Detail)</button>
                 <p id="road-model-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Checking quick road model…</p>
-                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.</p>
+                <p id="model-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.</p>
                 <div class="scan-progress" id="scan-progress" role="status" aria-live="polite">
                     <div class="scan-progress-label" id="scan-progress-label">Preparing imagery…</div>
                     <progress id="scan-progress-bar" max="100"></progress>
                     <small id="scan-progress-detail">Results appear on the map as they arrive.</small>
                 </div>
                 <p id="autosave-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:0 0 10px;">Reviewed features and road proposals are saved in this browser.</p>
-                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Feature for SAM Suggestion</button>
+                <button class="btn btn-primary" id="btn-sam-point" disabled>🧠 Click One Road for SAM Suggestion</button>
                 <button class="btn btn-secondary" id="btn-mapped-roads" disabled>🛣️ Compare with Census Roads</button>
-                <p style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">The click tool suggests a shape from imagery. Census roads are existing map data for comparison, not image detections.</p>
+                <p id="sam-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 10px;">Click a road in imagery for a SAM suggestion. Census roads are existing map data for comparison.</p>
                 <p id="sam-status" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:7px 0 10px;">Checking local SAM backend…</p>
                 <button class="btn btn-accent" id="btn-trace">✍️ Trace Road on Map</button>
                 <p id="trace-help" style="font-size:11px;line-height:1.4;color:#aeb3c5;margin:3px 0 9px;">Click along the road center. Drag yellow points to correct the line, then save it.</p>
@@ -463,7 +464,13 @@
 
             <div class="section">
                 <div class="section-title">Imagery &amp; map</div>
-                <p style="font-size:12px;line-height:1.5;color:#aeb3c5;">Map and analysis: USGS NAIP aerial imagery (contiguous U.S.). USGS Topo remains visible while imagery loads or outside coverage.</p>
+                <div class="input-group"><label for="map-view">Map display</label><select id="map-view"><option value="imagery">Imagery</option><option value="roads">Road map</option></select></div>
+                <div class="input-group"><label for="imagery-source">Imagery source</label><select id="imagery-source"><option value="usgs">USGS NAIP (contiguous U.S.)</option><option value="local">My georeferenced image (anywhere)</option></select></div>
+                <div class="input-group"><label for="local-image">Local aerial image (PNG or JPEG)</label><input id="local-image" type="file" accept="image/png,image/jpeg"></div>
+                <div class="input-row"><div class="input-group"><label for="image-west">West longitude</label><input id="image-west" type="number" step="any" placeholder="-89.60"></div><div class="input-group"><label for="image-south">South latitude</label><input id="image-south" type="number" step="any" placeholder="20.96"></div></div>
+                <div class="input-row"><div class="input-group"><label for="image-east">East longitude</label><input id="image-east" type="number" step="any" placeholder="-89.58"></div><div class="input-group"><label for="image-north">North latitude</label><input id="image-north" type="number" step="any" placeholder="20.98"></div></div>
+                <button class="btn btn-secondary" id="btn-load-local-image">Load Image at Bounds</button>
+                <p id="imagery-help" style="font-size:11px;line-height:1.5;color:#aeb3c5;">USGS NAIP supports imagery tracing in the contiguous U.S. For other locations, load an image you have rights to analyze and enter its exact WGS84 bounds. Traces save in this browser; reload the image after a refresh.</p>
             </div>
 
             <div class="section">
@@ -564,6 +571,8 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/maplibre-gl@5.12.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/dist/leaflet-maplibre-gl.js"></script>
     <script>
         class RoadDetectorEngine {
             constructor() {
@@ -584,6 +593,11 @@
                 this.editBackup = null;
                 this.featureType = 'road';
                 this.traceFeatureType = 'road';
+                this.mapView = 'imagery';
+                this.imagerySource = 'usgs';
+                this.localImage = null;
+                this.localImageBounds = null;
+                this.localImageUrl = null;
                 this.promptMode = false;
                 this.promptCandidate = null;
                 this.mappedRoadCandidates = [];
@@ -608,16 +622,13 @@
             }
 
             initMap() {
-                this.map = L.map('map', { center: [33.4484, -112.0740], zoom: 18 });
+                this.map = L.map('map', { center: [33.4484, -112.0740], zoom: 18, maxZoom: 22 });
 
-                L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
-                    maxZoom: 19, maxNativeZoom: 16,
-                    attribution: 'USGS The National Map'
-                }).addTo(this.map);
+                this.roadMapLayer = L.maplibreGL({ style: 'https://tiles.openfreemap.org/styles/liberty' }).addTo(this.map);
                 this.visibleImagery = null;
                 this.pendingImagery = null;
                 this.imageryRequest = 0;
-                this.map.attributionControl.addAttribution('Imagery: USGS / USDA / The National Map');
+                this.map.attributionControl.addAttribution('Imagery: USGS / USDA or user supplied image');
                 this.roadLayer = L.layerGroup().addTo(this.map);
                 this.areaLayer = L.layerGroup().addTo(this.map);
                 this.osmLayer = L.layerGroup().addTo(this.map);
@@ -653,6 +664,31 @@
                 this.loadVisibleImagery();
             }
 
+            isUsImageryArea() {
+                const center = this.map.getCenter();
+                return center.lat >= 24 && center.lat <= 50 && center.lng >= -125 && center.lng <= -66;
+            }
+
+            activeImagerySource() {
+                return this.imagerySource === 'local' ? 'your local aerial image' : 'USGS NAIP';
+            }
+
+            setMapView(view) {
+                if (view === 'roads' && this.traceMode) this.toggleTrace();
+                if (view === 'roads' && this.promptMode) this.togglePromptMode();
+                this.mapView = view;
+                document.getElementById('map-view').value = view;
+                if (view === 'roads') {
+                    ++this.imageryRequest;
+                    if (this.pendingImagery) this.map.removeLayer(this.pendingImagery);
+                    if (this.visibleImagery) this.map.removeLayer(this.visibleImagery);
+                    this.pendingImagery = null;
+                    this.visibleImagery = null;
+                    document.getElementById('map-source-status').textContent = 'Road map: OpenFreeMap';
+                } else this.loadVisibleImagery();
+                this.saveWork();
+            }
+
             imageryUrl(bounds, width, height) {
                 const southwest = L.CRS.EPSG3857.project(bounds.getSouthWest());
                 const northeast = L.CRS.EPSG3857.project(bounds.getNorthEast());
@@ -665,15 +701,27 @@
             }
 
             loadVisibleImagery() {
-                const center = this.map.getCenter();
                 const status = document.getElementById('map-source-status');
                 const request = ++this.imageryRequest;
-                if (center.lat < 24 || center.lat > 50 || center.lng < -125 || center.lng > -66) {
+                if (this.mapView === 'roads') { status.textContent = 'Road map: OpenFreeMap'; return; }
+                if (this.imagerySource === 'usgs' && !this.isUsImageryArea() ||
+                    this.imagerySource === 'local' && !this.localImage) {
                     if (this.pendingImagery) this.map.removeLayer(this.pendingImagery);
                     this.pendingImagery = null;
                     if (this.visibleImagery) this.map.removeLayer(this.visibleImagery);
                     this.visibleImagery = null;
-                    status.textContent = 'Outside USGS NAIP coverage';
+                    status.textContent = this.imagerySource === 'usgs'
+                        ? 'Outside USGS NAIP coverage — load your own aerial image'
+                        : 'Choose a local image and enter its WGS84 bounds';
+                    return;
+                }
+                if (this.imagerySource === 'local') {
+                    if (this.pendingImagery) this.map.removeLayer(this.pendingImagery);
+                    if (this.visibleImagery) this.map.removeLayer(this.visibleImagery);
+                    this.pendingImagery = null;
+                    this.visibleImagery = L.imageOverlay(this.localImageUrl, this.localImageBounds, { pane: 'overlayPane', interactive: false }).addTo(this.map);
+                    this.visibleImagery.bringToBack();
+                    status.textContent = 'Map and analysis: your local aerial image';
                     return;
                 }
                 const bounds = this.map.getBounds();
@@ -681,9 +729,9 @@
                 const width = Math.min(1600, Math.max(256, Math.round(size.x)));
                 const height = Math.min(1600, Math.max(256, Math.round(size.y)));
                 if (this.pendingImagery) this.map.removeLayer(this.pendingImagery);
-                status.textContent = 'Loading USGS NAIP map…';
+                status.textContent = `Loading ${this.activeImagerySource()}…`;
                 const overlay = L.imageOverlay(this.imageryUrl(bounds, width, height), bounds, {
-                    pane: 'tilePane', opacity: 0
+                    pane: 'overlayPane', opacity: 0, interactive: false
                 });
                 this.pendingImagery = overlay;
                 overlay.on('load', () => {
@@ -692,15 +740,54 @@
                     this.visibleImagery = overlay;
                     this.pendingImagery = null;
                     overlay.setOpacity(1);
-                    status.textContent = 'Map and analysis: USGS NAIP';
+                    status.textContent = `Map and analysis: ${this.activeImagerySource()}`;
                 });
                 overlay.on('error', () => {
                     if (request !== this.imageryRequest) return;
                     this.map.removeLayer(overlay);
                     this.pendingImagery = null;
-                    status.textContent = 'Imagery unavailable; USGS Topo fallback';
+                    status.textContent = `${this.activeImagerySource()} unavailable; road map visible`;
                 });
                 overlay.addTo(this.map);
+                overlay.bringToBack();
+            }
+
+            async loadLocalImage() {
+                const file = document.getElementById('local-image').files[0];
+                const [west, south, east, north] = ['image-west', 'image-south', 'image-east', 'image-north']
+                    .map(id => Number(document.getElementById(id).value));
+                const hasMissingBounds = ['image-west', 'image-south', 'image-east', 'image-north']
+                    .some(id => !document.getElementById(id).value.trim());
+                if (!file || !['image/png', 'image/jpeg'].includes(file.type)) {
+                    this.setMode('error', 'Choose a PNG or JPEG aerial image.');
+                    return;
+                }
+                if (hasMissingBounds || ![west, south, east, north].every(Number.isFinite) || west >= east || south >= north ||
+                    west < -180 || east > 180 || south < -85 || north > 85) {
+                    this.setMode('error', 'Enter valid WGS84 west, south, east, and north image bounds.');
+                    return;
+                }
+                const url = URL.createObjectURL(file);
+                try {
+                    const img = new Image();
+                    await new Promise((resolve, reject) => {
+                        img.onload = resolve;
+                        img.onerror = () => reject(new Error('The selected image could not be read.'));
+                        img.src = url;
+                    });
+                    if (this.localImageUrl) URL.revokeObjectURL(this.localImageUrl);
+                    this.localImage = img;
+                    this.localImageUrl = url;
+                    this.localImageBounds = L.latLngBounds([[south, west], [north, east]]);
+                    this.imagerySource = 'local';
+                    document.getElementById('imagery-source').value = 'local';
+                    this.map.fitBounds(this.localImageBounds);
+                    this.setMapView('imagery');
+                    this.setMode('ready', `Loaded ${file.name} for imagery tracing`);
+                } catch (error) {
+                    URL.revokeObjectURL(url);
+                    this.setMode('error', error.message);
+                }
             }
 
             initSliders() {
@@ -723,6 +810,13 @@
                 document.getElementById('btn-road-model').addEventListener('click', () => this.findRoadsInImagery());
                 document.getElementById('btn-samroad-model').addEventListener('click', () => this.findRoadsInImagery('samroad'));
                 document.getElementById('feature-type').addEventListener('change', () => this.setFeatureType());
+                document.getElementById('map-view').addEventListener('change', event => this.setMapView(event.target.value));
+                document.getElementById('imagery-source').addEventListener('change', event => {
+                    this.imagerySource = event.target.value;
+                    this.loadVisibleImagery();
+                    this.saveWork();
+                });
+                document.getElementById('btn-load-local-image').addEventListener('click', () => this.loadLocalImage());
                 document.getElementById('btn-trace').addEventListener('click', () => this.toggleTrace());
                 document.getElementById('btn-undo-point').addEventListener('click', () => this.undoTracePoint());
                 document.getElementById('btn-finish-trace').addEventListener('click', () => this.finishTrace());
@@ -735,7 +829,7 @@
                         const lat = parseFloat(document.getElementById('center-lat').value);
                         const lon = parseFloat(document.getElementById('center-lon').value);
                         if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
-                            this.map.panTo([lat, lon]);
+                            this.map.setView([lat, lon], this.map.getZoom(), { animate: false });
                             this.updateDetectionArea();
                             this.saveWork();
                         }
@@ -795,6 +889,14 @@
                         ['LineString', 'Polygon'].includes(feature.geometry?.type) && feature.properties);
                     this.modelRoadCandidates = saved.proposals.filter(road =>
                         Array.isArray(road.coordinates) && road.coordinates.length > 1 && road.source);
+                    if (['usgs', 'local'].includes(saved.imagerySource)) {
+                        this.imagerySource = saved.imagerySource;
+                        document.getElementById('imagery-source').value = saved.imagerySource;
+                    }
+                    if (['roads', 'imagery'].includes(saved.mapView)) {
+                        this.mapView = saved.mapView;
+                        document.getElementById('map-view').value = saved.mapView;
+                    }
                     if (saved.view && Array.isArray(saved.view.center) && Number.isFinite(saved.view.zoom))
                         this.map.setView(saved.view.center, saved.view.zoom);
                     if ([512, 1024].includes(Number(saved.captureSize)))
@@ -808,6 +910,7 @@
                     this.drawModelRoads();
                     this.updateLayerCount();
                     this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
+                    this.loadVisibleImagery();
                     document.getElementById('autosave-status').textContent =
                         `Restored ${this.allRoads.length} reviewed features and ${this.modelRoadCandidates.length} road proposals from this browser.`;
                 } catch (error) {
@@ -822,6 +925,7 @@
                     localStorage.setItem(this.storageKey, JSON.stringify({
                         version: 1, savedAt: new Date().toISOString(), features: this.allRoads,
                         proposals: this.modelRoadCandidates,
+                        mapView: this.mapView, imagerySource: this.imagerySource,
                         view: { center: [this.map.getCenter().lat, this.map.getCenter().lng], zoom: this.map.getZoom() },
                         captureSize: Number(document.getElementById('capture-size').value),
                         detectionCenter: [Number(document.getElementById('center-lat').value), Number(document.getElementById('center-lon').value)]
@@ -876,19 +980,40 @@
                 const size = parseInt(document.getElementById('capture-size').value, 10);
                 const lat = parseFloat(document.getElementById('center-lat').value);
                 const lon = parseFloat(document.getElementById('center-lon').value);
-                if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < 24 || lat > 50 || lon < -125 || lon > -66) {
-                    throw new Error('Choose a location in the contiguous United States.');
-                }
+                if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 85 || Math.abs(lon) > 180)
+                    throw new Error('Choose a valid location for imagery capture.');
+                if (this.imagerySource === 'usgs' && !this.isUsImageryArea())
+                    throw new Error('USGS NAIP is limited to the contiguous U.S. Load your own georeferenced aerial image for this location.');
                 this.updateDetectionArea();
                 const { minLon, minLat, maxLon, maxLat } = this.captureBounds;
                 const bounds = L.latLngBounds([[minLat, minLon], [maxLat, maxLon]]);
+                if (this.imagerySource === 'local') {
+                    if (!this.localImage || !this.localImageBounds) throw new Error('Load a local aerial image and its WGS84 bounds first.');
+                    const imageSW = L.CRS.EPSG3857.project(this.localImageBounds.getSouthWest());
+                    const imageNE = L.CRS.EPSG3857.project(this.localImageBounds.getNorthEast());
+                    const captureSW = L.CRS.EPSG3857.project(bounds.getSouthWest());
+                    const captureNE = L.CRS.EPSG3857.project(bounds.getNorthEast());
+                    if (captureSW.x < imageSW.x || captureSW.y < imageSW.y || captureNE.x > imageNE.x || captureNE.y > imageNE.y)
+                        throw new Error('Analysis area falls outside the loaded image. Move the center or load a larger image.');
+                    const sx = (captureSW.x - imageSW.x) / (imageNE.x - imageSW.x) * this.localImage.width;
+                    const sy = (imageNE.y - captureNE.y) / (imageNE.y - imageSW.y) * this.localImage.height;
+                    const sw = (captureNE.x - captureSW.x) / (imageNE.x - imageSW.x) * this.localImage.width;
+                    const sh = (captureNE.y - captureSW.y) / (imageNE.y - imageSW.y) * this.localImage.height;
+                    this.captureCanvas.width = size;
+                    this.captureCanvas.height = size;
+                    this.processCanvas.width = size;
+                    this.processCanvas.height = size;
+                    this.captureCtx.drawImage(this.localImage, sx, sy, sw, sh, 0, 0, size, size);
+                    this.capturedImage = this.captureCtx.getImageData(0, 0, size, size);
+                    return;
+                }
                 const url = this.imageryUrl(bounds, size, size);
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
                 await new Promise((resolve, reject) => {
-                    const timer = setTimeout(() => reject(new Error('USGS imagery request timed out.')), 20000);
+                    const timer = setTimeout(() => reject(new Error(`${this.activeImagerySource()} request timed out.`)), 20000);
                     img.onload = () => { clearTimeout(timer); resolve(); };
-                    img.onerror = () => { clearTimeout(timer); reject(new Error('USGS imagery is unavailable for this area.')); };
+                    img.onerror = () => { clearTimeout(timer); reject(new Error(`${this.activeImagerySource()} is unavailable for this area.`)); };
                     img.src = url;
                 });
                 this.captureCanvas.width = size;
@@ -962,10 +1087,20 @@
                 this.rejectPromptCandidate();
                 const building = this.featureType === 'building';
                 document.getElementById('btn-trace').textContent = building ? '✍️ Trace Building on Map' : '✍️ Trace Road on Map';
+                document.getElementById('btn-sam-point').textContent = building ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
+                document.getElementById('model-help').textContent = building
+                    ? 'The road graph models do not detect buildings. Use SAM to suggest one roof footprint or draw it by hand, then review the outline.'
+                    : 'SAM-Road: solid purple lines. Quick preview: dashed amber lines. Both are unreviewed proposals.';
+                document.getElementById('sam-help').textContent = building
+                    ? 'Click a visible roof in imagery for a SAM footprint suggestion. SAM does not know which objects are buildings; inspect the outline before saving.'
+                    : 'Click a road in imagery for a SAM suggestion. Census roads are existing map data for comparison.';
+                document.getElementById('btn-samroad-model').textContent = building ? 'Building model unavailable (use SAM below)' : '🕸️ Find Roads with SAM-Road (Local)';
+                document.getElementById('btn-road-model').textContent = building ? 'Quick road preview unavailable for buildings' : '⚡ Quick Road Preview (Lower Detail)';
                 document.getElementById('trace-help').textContent = building
                     ? 'Click around the visible roof boundary. Drag orange points to correct the footprint, then save it.'
                     : 'Click along the road center. Drag yellow points to correct the line, then save it.';
                 document.getElementById('snap-osm').disabled = building;
+                document.getElementById('btn-osm').disabled = building || !document.getElementById('sam-status').textContent.includes('available locally');
                 document.getElementById('btn-mapped-roads').disabled = building || document.getElementById('btn-osm').disabled;
                 document.getElementById('btn-road-model').disabled = building || !document.getElementById('road-model-status').textContent.startsWith('Road-specific');
                 document.getElementById('btn-samroad-model').disabled = building || !document.getElementById('samroad-model-status').textContent.startsWith('Original SAM-Road');
@@ -980,11 +1115,21 @@
                 if (this.promptMode) {
                     this.promptMode = false;
                     document.body.classList.remove('trace-active');
-                    document.getElementById('btn-sam-point').textContent = '🧠 Click One Feature for SAM Suggestion';
+                    document.getElementById('btn-sam-point').textContent = this.featureType === 'building'
+                        ? '🧠 Click One Building for SAM Suggestion' : '🧠 Click One Road for SAM Suggestion';
                     this.setMode('ready', 'SAM selection cancelled');
                     return;
                 }
                 if (this.traceMode) this.toggleTrace();
+                if (this.mapView !== 'imagery') this.setMapView('imagery');
+                if (this.imagerySource === 'usgs' && !this.isUsImageryArea()) {
+                    this.setMode('error', 'Load your own georeferenced aerial image for imagery outside the U.S.');
+                    return;
+                }
+                if (this.imagerySource === 'local' && !this.localImage) {
+                    this.setMode('error', 'Load a local aerial image and its WGS84 bounds first.');
+                    return;
+                }
                 this.promptMode = true;
                 document.body.classList.add('trace-active');
                 document.getElementById('btn-sam-point').textContent = '✕ Cancel SAM Selection';
@@ -996,7 +1141,7 @@
                 this.togglePromptMode();
                 this.rejectPromptCandidate();
                 if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
-                    this.setMode('error', 'Wait for USGS aerial imagery to appear before tracing it');
+                    this.setMode('error', `Wait for ${this.activeImagerySource()} imagery to appear before tracing it`);
                     return;
                 }
                 const selectedType = this.featureType;
@@ -1011,15 +1156,16 @@
                     const sw = L.CRS.EPSG3857.project(L.latLng(b.minLat, b.minLon));
                     const ne = L.CRS.EPSG3857.project(L.latLng(b.maxLat, b.maxLon));
                     const form = new FormData();
-                    form.append('image', image, 'naip.png');
+                    form.append('image', image, 'imagery.png');
                     form.append('bbox3857', JSON.stringify([sw.x, sw.y, ne.x, ne.y]));
                     form.append('seed_x', String(b.width / 2));
                     form.append('seed_y', String(b.height / 2));
                     form.append('feature_type', selectedType);
-                    this.setMode('detecting', `SAM tracing the selected ${selectedType} in USGS imagery…`);
+                    this.setMode('detecting', `SAM tracing the selected ${selectedType} in ${this.activeImagerySource()} imagery…`);
                     const response = await fetch('/api/sam-point', { method: 'POST', body: form });
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+                    result.source = `${this.imagerySource}_sam_point_prompt`;
                     this.promptCandidate = result;
                     const coords = result.geometry.type === 'Polygon' ? result.geometry.coordinates[0] : result.geometry.coordinates;
                     const latLngs = coords.map(([lon, lat]) => [lat, lon]);
@@ -1040,7 +1186,7 @@
                 const p = this.promptCandidate;
                 document.getElementById('feature-props').innerHTML = `
                     <h4>${p.feature_type === 'building' ? 'Building footprint' : 'Road centerline'} suggestion</h4>
-                    <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">USGS NAIP + point-prompted SAM</span></div>
+                    <div class="prop-row"><span class="prop-key">Source</span><span class="prop-value">${this.activeImagerySource()} + point-prompted SAM</span></div>
                     <div class="prop-row"><span class="prop-key">SAM score</span><span class="prop-value">${p.score}</span></div>
                     <p style="font-size:11px;line-height:1.4;">SAM has no feature labels. Keep this only if the overlay follows the selected object in the image.</p>
                     <button class="btn btn-primary" onclick="detector.keepPromptCandidate()">Keep suggestion</button>
@@ -1106,7 +1252,7 @@
             async showMappedRoads() {
                 if (this.featureType !== 'road') return;
                 if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
-                    this.setMode('error', 'Wait for USGS aerial imagery to appear before comparing mapped roads');
+                    this.setMode('error', `Wait for ${this.activeImagerySource()} imagery to appear before comparing mapped roads`);
                     return;
                 }
                 const b = this.captureBounds;
@@ -1175,7 +1321,7 @@
                 if (this.featureType !== 'road') return;
                 if (this.scanBusy) return;
                 if (!this.visibleImagery || !this.map.hasLayer(this.visibleImagery)) {
-                    this.setMode('error', 'Wait for USGS aerial imagery to appear before detecting roads');
+                    this.setMode('error', `Wait for ${this.activeImagerySource()} imagery to appear before detecting roads`);
                     return;
                 }
                 const button = document.getElementById(model === 'samroad' ? 'btn-samroad-model' : 'btn-road-model');
@@ -1229,7 +1375,7 @@
                         }
                         if (message.type === 'line') {
                             this.modelRoadCandidates.push({ coordinates: message.coordinates, confidence: message.confidence,
-                                source: model === 'samroad' ? 'usgs_naip_sam_road_cityscale_graph' : 'usgs_naip_road_segmentation_BAH', scanKey });
+                                source: model === 'samroad' ? `${this.imagerySource}_sam_road_cityscale_graph` : `${this.imagerySource}_road_segmentation_BAH`, scanKey });
                             newCount++;
                             this.drawModelRoads();
                             this.updateStats(this.modelRoadCandidates.map(road => road.coordinates));
@@ -1285,7 +1431,7 @@
                     <h4>${road.source.includes('sam_road') ? 'SAM-Road graph' : 'Quick road preview'} proposal #${index + 1}</h4>
                     <div class="prop-row"><span class="prop-key">Length</span><span class="prop-value">${this.calculateGeoLength(road.coordinates)} m</span></div>
                     <div class="prop-row"><span class="prop-key">Model score</span><span class="prop-value">${road.confidence}</span></div>
-                    <p style="font-size:11px;line-height:1.4;">Predicted from USGS NAIP pixels. Check alignment and gaps before keeping it.</p>
+                    <p style="font-size:11px;line-height:1.4;">Predicted from ${this.activeImagerySource()} pixels. Check alignment and gaps before keeping it.</p>
                     <button class="btn btn-primary" onclick="detector.keepModelRoad(${index})">Keep road</button>
                     <button class="btn btn-secondary" onclick="detector.rejectModelRoad(${index})">Reject</button>`;
             }
@@ -1369,6 +1515,15 @@
                     return;
                 }
                 if (this.promptMode) this.togglePromptMode();
+                if (this.mapView !== 'imagery') this.setMapView('imagery');
+                if (this.imagerySource === 'usgs' && !this.isUsImageryArea()) {
+                    this.setMode('error', 'Load your own georeferenced aerial image for imagery outside the U.S.');
+                    return;
+                }
+                if (this.imagerySource === 'local' && !this.localImage) {
+                    this.setMode('error', 'Load a local aerial image and its WGS84 bounds before tracing.');
+                    return;
+                }
                 this.traceMode = true;
                 this.traceFeatureType = this.featureType;
                 this.tracePoints = [];
@@ -1427,7 +1582,7 @@
                     type: 'Feature', geometry: building ? { type: 'Polygon', coordinates: [coordinates] } : { type: 'LineString', coordinates },
                     properties: {
                         id: this.editIndex === null ? `trace_${Date.now()}` : this.allRoads[this.editIndex].properties.id,
-                        feature_type: this.traceFeatureType, source: 'user_traced_from_usgs_naip', review_status: 'user_traced_unverified',
+                        feature_type: this.traceFeatureType, source: `user_traced_from_${this.imagerySource}_imagery`, review_status: 'user_traced_unverified',
                         detected_at: new Date().toISOString(),
                         ...(building ? { area_m2: this.calculateGeoArea(coordinates) } : { length_m: this.calculateGeoLength(coordinates) })
                     }
@@ -1477,7 +1632,7 @@
                 this.currentSource = 'usgs_naip_sam_mask_heuristic';
                 this.displayVectorizedRoads([]);
                 this.updateStats([]);
-                this.setMode('detecting', 'Fetching USGS NAIP image for local SAM…');
+                this.setMode('detecting', `Fetching ${this.activeImagerySource()} image for local SAM…`);
                 try {
                     await this.captureMapArea();
                     const image = await new Promise((resolve, reject) =>
@@ -1928,7 +2083,7 @@
                     const building = feature.geometry.type === 'Polygon';
                     const coords = building ? feature.geometry.coordinates[0] : feature.geometry.coordinates;
                     const latLngs = coords.map(([lon, lat]) => [lat, lon]);
-                    const savedColor = building ? '#ff9b3d' : feature.properties.source === 'user_traced_from_usgs_naip' ? '#ffcc33' : color;
+                    const savedColor = building ? '#ff9b3d' : feature.properties.source?.startsWith('user_traced_from_') ? '#ffcc33' : color;
                     const style = { color: savedColor, weight: Math.max(weight, 4), opacity: 0.9, fillOpacity: 0.12, bubblingMouseEvents: false };
                     const shape = building ? L.polygon(latLngs, style) : L.polyline(latLngs, style);
                     shape.on('click', () => this.showFeatureProperties(coords, idx, { ...feature.properties, saved: true }));
@@ -2148,7 +2303,15 @@
             lat2tile(lat, zoom) { return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom); }
         }
 
-        const detector = new RoadDetectorEngine();
+        if (location.protocol === 'file:') {
+            document.body.innerHTML = `<main style="max-width:640px;margin:10vh auto;padding:32px;font:16px/1.5 Segoe UI,sans-serif;color:#e0e0e0;background:#171722;border:1px solid #45455a;border-radius:14px">
+                <h1 style="margin-bottom:12px">Open AetherMap through its local launcher</h1>
+                <p style="margin-bottom:16px">The HTML file alone cannot start the local tracing models or road reference service. Double-click <strong>start-local-sam.bat</strong> in this folder. It starts the server, waits until it is ready, then opens the app.</p>
+                <p>If the launcher is already running, <a style="color:#64d9ff" href="http://127.0.0.1:8767/">open AetherMap here</a>.</p>
+            </main>`;
+        } else {
+            window.detector = new RoadDetectorEngine();
+        }
     </script>
 </body>
 </html>
